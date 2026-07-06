@@ -6,6 +6,7 @@ venv
 .obsidian/workspace-mobile.json
 .obsidian/cache
 .trash/
+.swp
 
 # OS
 .DS_Store
