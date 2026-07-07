@@ -45,6 +45,8 @@ func main() {
 		workers     = flag.Int("workers", 100, "concurrent workers (connect mode)")
 		timeout     = flag.Duration("timeout", 1500*time.Millisecond, "per-connection timeout")
 		seedFlag    = flag.Int64("seed", -1, "permutation seed for reproducible order (-1 = random)")
+		retries     = flag.Int("retries", 1, "SYN retransmissions per probe (syn mode)")
+		grace       = flag.Duration("grace", 3*time.Second, "wait for late replies after sending (syn mode)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
 	)
 	flag.Parse()
@@ -76,13 +78,6 @@ func main() {
 			space.Total(), bigScanThreshold)
 	}
 
-	if *mode == "syn" {
-		fatal("SYN mode is not implemented yet (planned step 5); use --mode connect")
-	}
-	if *mode != "connect" {
-		fatal("unknown mode %q (want connect|syn)", *mode)
-	}
-
 	seed := pickSeed(*seedFlag)
 
 	var limiter *rate.Limiter
@@ -94,19 +89,27 @@ func main() {
 		limiter = rate.NewLimiter(rate.Limit(*ratePPS), burst)
 	}
 
-	prober := &scan.ConnectProber{
-		Ports:   ports,
-		Workers: *workers,
-		Timeout: *timeout,
-		Limiter: limiter,
+	var prober scan.Prober
+	switch *mode {
+	case "connect":
+		prober = &scan.ConnectProber{
+			Ports:   ports,
+			Workers: *workers,
+			Timeout: *timeout,
+			Limiter: limiter,
+		}
+	case "syn":
+		prober = scan.NewSYNProber(ports, *retries, *grace, limiter)
+	default:
+		fatal("unknown mode %q (want connect|syn)", *mode)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	fmt.Fprintf(os.Stderr, "[*] targets : %d addresses (seed=%d)\n", space.Total(), seed)
-	fmt.Fprintf(os.Stderr, "[*] ports   : %s | mode=connect | rate=%.0f pps | workers=%d\n",
-		*portsFlag, *ratePPS, *workers)
+	fmt.Fprintf(os.Stderr, "[*] ports   : %s | mode=%s | rate=%.0f pps | workers=%d\n",
+		*portsFlag, *mode, *ratePPS, *workers)
 
 	// Encode discovered hosts to stdout while the prober runs.
 	out := make(chan model.WireRecord, 256)
