@@ -10,8 +10,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/netip"
 	"os"
 	"sort"
 	"time"
@@ -22,6 +24,7 @@ import (
 func main() {
 	dbPath := flag.String("db", "", "SQLite database path")
 	interval := flag.Duration("interval", 0, "refresh interval (0 = one shot)")
+	hostIP := flag.String("host", "", "print the full record for this IP and exit")
 	flag.Parse()
 	if *dbPath == "" {
 		fmt.Fprintln(os.Stderr, "ns-status: --db is required")
@@ -36,6 +39,11 @@ func main() {
 	defer st.Close()
 
 	ctx := context.Background()
+
+	if *hostIP != "" {
+		printHost(ctx, st, *hostIP)
+		return
+	}
 	for {
 		s, err := st.Stats(ctx)
 		if err != nil {
@@ -51,6 +59,25 @@ func main() {
 		}
 		time.Sleep(*interval)
 	}
+}
+
+func printHost(ctx context.Context, st *store.SQLite, ipStr string) {
+	ip, err := netip.ParseAddr(ipStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ns-status: bad IP %q: %v\n", ipStr, err)
+		os.Exit(1)
+	}
+	h, err := st.Host(ctx, ip)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ns-status: %v\n", err)
+		os.Exit(1)
+	}
+	if h == nil {
+		fmt.Fprintf(os.Stderr, "ns-status: host %s not found\n", ipStr)
+		os.Exit(1)
+	}
+	out, _ := json.MarshalIndent(h, "", "  ")
+	fmt.Println(string(out))
 }
 
 func printStats(s store.Stats) {
