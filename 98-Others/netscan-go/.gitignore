@@ -1,0 +1,13 @@
+# compiled binaries
+/ns-discover
+/ns-ingest
+/ns-enrich
+/ns-status
+/bin/
+*.exe
+
+# scan databases and outputs
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
