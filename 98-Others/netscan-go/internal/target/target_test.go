@@ -114,6 +114,40 @@ func TestRandomizedIsBijection(t *testing.T) {
 	}
 }
 
+func TestPermutationSmallTotals(t *testing.T) {
+	// Non-power-of-two and tiny totals (e.g. a /32 has total 1) must still map
+	// every position to a distinct index within [0, total).
+	for _, total := range []uint64{1, 2, 3, 5, 7, 100, 257} {
+		p := NewPermutation(total, 0xABCD)
+		seen := make(map[uint64]bool, total)
+		for pos := uint64(0); pos < total; pos++ {
+			got := p.Shuffle(pos)
+			if got >= total {
+				t.Fatalf("total=%d: Shuffle(%d)=%d out of range", total, pos, got)
+			}
+			if seen[got] {
+				t.Fatalf("total=%d: Shuffle produced duplicate %d", total, got)
+			}
+			seen[got] = true
+		}
+	}
+}
+
+func TestSingleHostRange(t *testing.T) {
+	// A /32 must yield exactly its one address in randomized order.
+	s, err := NewSpace([]string{"8.8.8.8/32"}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []netip.Addr
+	for addr := range s.Randomized(1) {
+		got = append(got, addr)
+	}
+	if len(got) != 1 || got[0] != netip.MustParseAddr("8.8.8.8") {
+		t.Fatalf("/32 randomized = %v, want [8.8.8.8]", got)
+	}
+}
+
 func TestSeedReproducible(t *testing.T) {
 	s, err := NewSpace([]string{"1.2.0.0/20"}, nil, false)
 	if err != nil {
