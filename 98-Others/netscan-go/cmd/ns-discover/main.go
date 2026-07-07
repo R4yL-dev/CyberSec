@@ -135,8 +135,12 @@ func main() {
 	<-encDone
 
 	fmt.Fprintf(os.Stderr, "[+] %d host(s) with open ports in %s\n", found, time.Since(start).Round(time.Millisecond))
-	if runErr != nil && ctx.Err() != nil {
-		fmt.Fprintln(os.Stderr, "[*] interrupted")
+	if runErr != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "[*] interrupted")
+		} else {
+			fatal("%v", runErr)
+		}
 	}
 }
 
