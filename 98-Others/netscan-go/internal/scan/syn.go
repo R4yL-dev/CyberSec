@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,10 +44,15 @@ type SYNProber struct {
 	srcPort uint16
 }
 
-// NewSYNProber builds a SYN prober with a random cookie secret and source port.
-func NewSYNProber(ports []uint16, retries int, grace time.Duration, limiter *rate.Limiter) *SYNProber {
+// NewSYNProber builds a SYN prober with a random cookie secret. srcPort is the
+// TCP source port for the scan (0 picks a random ephemeral port); pinning it
+// lets an iptables RST rule be scoped to exactly this scan.
+func NewSYNProber(ports []uint16, retries int, grace time.Duration, srcPort uint16, limiter *rate.Limiter) *SYNProber {
 	if retries < 1 {
 		retries = 1
+	}
+	if srcPort == 0 {
+		srcPort = uint16(40000 + rand.IntN(20000))
 	}
 	return &SYNProber{
 		Ports:   ports,
@@ -54,9 +60,13 @@ func NewSYNProber(ports []uint16, retries int, grace time.Duration, limiter *rat
 		Grace:   grace,
 		Limiter: limiter,
 		secret:  rand.Uint32(),
-		srcPort: uint16(40000 + rand.IntN(20000)),
+		srcPort: srcPort,
 	}
 }
+
+// SrcPort reports the TCP source port used for the scan (useful for scoping an
+// iptables RST rule).
+func (p *SYNProber) SrcPort() uint16 { return p.srcPort }
 
 func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out chan<- model.WireRecord) error {
 	iface, srcIP, err := defaultRoute()
@@ -64,7 +74,9 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 		return fmt.Errorf("route discovery: %w", err)
 	}
 
-	handle, err := pcap.OpenLive(iface, 65536, false, pcap.BlockForever)
+	// A short read timeout (not BlockForever) lets the receiver poll a stop flag
+	// and exit cleanly — closing a pcap handle blocked in a read is unsafe.
+	handle, err := pcap.OpenLive(iface, 65536, false, 100*time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("pcap open %s: %w (need CAP_NET_RAW?)", iface, err)
 	}
@@ -78,12 +90,21 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 	var (
 		mu      sync.Mutex
 		openMap = map[netip.Addr]map[uint16]struct{}{}
+		stop    atomic.Bool
 	)
 	recvDone := make(chan struct{})
 	go func() {
 		defer close(recvDone)
-		src := gopacket.NewPacketSource(handle, handle.LinkType())
-		for packet := range src.Packets() {
+		linkType := handle.LinkType()
+		for !stop.Load() {
+			data, _, err := handle.ReadPacketData()
+			if err == pcap.NextErrorTimeoutExpired {
+				continue
+			}
+			if err != nil {
+				return
+			}
+			packet := gopacket.NewPacket(data, linkType, gopacket.DecodeOptions{Lazy: true, NoCopy: true})
 			tl := packet.Layer(layers.LayerTypeTCP)
 			nl := packet.Layer(layers.LayerTypeIPv4)
 			if tl == nil || nl == nil {
@@ -112,8 +133,9 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
 	if err != nil {
-		handle.Close()
+		stop.Store(true)
 		<-recvDone
+		handle.Close()
 		return fmt.Errorf("raw socket: %w (need CAP_NET_RAW?)", err)
 	}
 
