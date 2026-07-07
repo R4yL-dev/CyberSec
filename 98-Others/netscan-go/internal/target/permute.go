@@ -16,11 +16,18 @@ type Permutation struct {
 
 // NewPermutation builds a permutation over [0, total) keyed by seed.
 func NewPermutation(total, seed uint64) *Permutation {
-	if total < 2 {
-		total = 2 // degenerate domains still need a valid Feistel size
+	if total == 0 {
+		total = 1
+	}
+	// Size the Feistel domain to the smallest even bit-width whose 2^bits is at
+	// least total (and at least 2 bits). total itself stays the cycle-walk bound
+	// so Shuffle only ever returns indices in [0, total).
+	size := total
+	if size < 2 {
+		size = 2
 	}
 	bits := uint(1)
-	for (uint64(1) << bits) < total {
+	for (uint64(1) << bits) < size {
 		bits++
 	}
 	if bits%2 != 0 {
