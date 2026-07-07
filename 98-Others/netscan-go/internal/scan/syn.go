@@ -145,13 +145,14 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 	_ = p.send(ctx, fd, src4, addrs)
 	syscall.Close(fd)
 
-	// Wait for late replies, then stop the receiver.
+	// Wait for late replies, then stop the receiver and close the handle.
 	select {
 	case <-time.After(p.Grace):
 	case <-ctx.Done():
 	}
-	handle.Close()
+	stop.Store(true)
 	<-recvDone
+	handle.Close()
 
 	mu.Lock()
 	defer mu.Unlock()

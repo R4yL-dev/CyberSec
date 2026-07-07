@@ -47,6 +47,7 @@ func main() {
 		seedFlag    = flag.Int64("seed", -1, "permutation seed for reproducible order (-1 = random)")
 		retries     = flag.Int("retries", 1, "SYN retransmissions per probe (syn mode)")
 		grace       = flag.Duration("grace", 3*time.Second, "wait for late replies after sending (syn mode)")
+		synSrcPort  = flag.Int("src-port", 0, "SYN source port, 0 = random (syn mode; pin to scope the iptables RST rule)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
 	)
 	flag.Parse()
@@ -99,7 +100,12 @@ func main() {
 			Limiter: limiter,
 		}
 	case "syn":
-		prober = scan.NewSYNProber(ports, *retries, *grace, limiter)
+		if *synSrcPort < 0 || *synSrcPort > 65535 {
+			fatal("src-port out of range: %d", *synSrcPort)
+		}
+		sp := scan.NewSYNProber(ports, *retries, *grace, uint16(*synSrcPort), limiter)
+		fmt.Fprintf(os.Stderr, "[*] syn     : src-port=%d (scope iptables RST rule to this port)\n", sp.SrcPort())
+		prober = sp
 	default:
 		fatal("unknown mode %q (want connect|syn)", *mode)
 	}
