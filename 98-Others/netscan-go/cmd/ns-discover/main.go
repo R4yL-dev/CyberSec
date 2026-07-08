@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
@@ -278,9 +279,51 @@ func raiseNOFILE() uint64 {
 	return uint64(lim.Cur)
 }
 
-// startProgress writes a discovery heartbeat (scanned/total, found) every second
-// until the returned stop func is called (which also writes a final heartbeat).
-func startProgress(st *store.SQLite, total uint64, scanned, found *int64) func() {
+// checkpointKey stores discovery's resumable position in the meta table.
+const checkpointKey = "discover.checkpoint"
+
+type checkpoint struct {
+	Sig   string `json:"sig"`
+	Seed  uint64 `json:"seed"`
+	Pos   uint64 `json:"pos"`
+	Total uint64 `json:"total"`
+}
+
+// loadCheckpoint reads a checkpoint and validates it matches the current target
+// signature. ok is false when there is nothing to resume; a non-nil error means
+// a checkpoint exists but is for a different target set.
+func loadCheckpoint(st *store.SQLite, sig string) (checkpoint, bool, error) {
+	v, err := st.GetMeta(context.Background(), checkpointKey)
+	if err != nil {
+		return checkpoint{}, false, err
+	}
+	if v == "" {
+		return checkpoint{}, false, nil
+	}
+	var ck checkpoint
+	if err := json.Unmarshal([]byte(v), &ck); err != nil {
+		return checkpoint{}, false, nil
+	}
+	if ck.Sig != sig {
+		return checkpoint{}, false, fmt.Errorf("checkpoint is for a different target set")
+	}
+	return ck, true, nil
+}
+
+func writeCheckpoint(st *store.SQLite, sig string, seed uint64, pos *uint64, total uint64) {
+	b, _ := json.Marshal(checkpoint{Sig: sig, Seed: seed, Pos: atomic.LoadUint64(pos), Total: total})
+	_ = st.SetMeta(context.Background(), checkpointKey, string(b))
+}
+
+func clearCheckpoint(st *store.SQLite) error {
+	return st.SetMeta(context.Background(), checkpointKey, "")
+}
+
+// startProgress writes a discovery heartbeat (scanned/total, found) and a resume
+// checkpoint every second until the returned stop func is called (which also
+// writes a final one).
+func startProgress(st *store.SQLite, total uint64, scanned, found *int64,
+	sig string, seed uint64, pos *uint64, addrTotal uint64) func() {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	write := func() {
@@ -292,6 +335,7 @@ func startProgress(st *store.SQLite, total uint64, scanned, found *int64) func()
 			Note:      fmt.Sprintf("found=%d", atomic.LoadInt64(found)),
 			UpdatedAt: time.Now().UTC(),
 		})
+		writeCheckpoint(st, sig, seed, pos, addrTotal)
 	}
 	go func() {
 		defer close(stopped)
