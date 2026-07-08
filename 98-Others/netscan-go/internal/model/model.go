@@ -12,7 +12,9 @@ import (
 // heavier paliers (and a targeted "recheck") plug in later without changing
 // the queue or the store.
 const (
-	StageLight = "light"
+	StageLight   = "light"   // cheap HTTP probe + TLS summary (entry palier)
+	StageWebinfo = "webinfo" // richer HTTP fetch + analyzers (tech, headers, favicon)
+	StagePTR     = "ptr"     // reverse DNS
 )
 
 // WireRecord is one line of NDJSON: what ns-discover emits for a responding
@@ -31,6 +33,7 @@ type HostRecord struct {
 	OpenPorts []uint16             `json:"open_ports"`
 	Ports     map[uint16]*PortInfo `json:"ports,omitempty"`
 
+	PTR       []string          `json:"ptr,omitempty"` // reverse DNS names
 	Status    map[string]string `json:"status,omitempty"` // per-stage status
 	Attempts  int               `json:"attempts"`
 	FirstSeen time.Time         `json:"first_seen"`
@@ -42,6 +45,18 @@ type PortInfo struct {
 	Port uint16    `json:"port"`
 	HTTP *HTTPInfo `json:"http,omitempty"`
 	TLS  *TLSInfo  `json:"tls,omitempty"`
+	Web  *WebInfo  `json:"web,omitempty"`
+}
+
+// WebInfo holds the derived results of the webinfo palier (a richer HTTP fetch
+// than light): only small, extracted data — never the raw body.
+type WebInfo struct {
+	Headers         map[string]string `json:"headers,omitempty"`
+	Cookies         []string          `json:"cookies,omitempty"`
+	Technologies    []string          `json:"technologies,omitempty"`
+	SecurityHeaders map[string]string `json:"security_headers,omitempty"`
+	FaviconHash     string            `json:"favicon_hash,omitempty"`
+	Error           string            `json:"error,omitempty"`
 }
 
 // HTTPInfo mirrors the light HTTP probe (port of probe_http in netscan.py).
