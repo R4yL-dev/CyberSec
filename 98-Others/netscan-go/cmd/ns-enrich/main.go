@@ -64,7 +64,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var processed int64
+	var processed, inflight int64 // inflight = claimed but not yet fully processed
 	itemCh := make(chan store.WorkItem, *workers)
 
 	var wg sync.WaitGroup
@@ -74,6 +74,7 @@ func main() {
 			defer wg.Done()
 			for it := range itemCh {
 				process(ctx, st, pl, it, *maxAttempts, *backoff)
+				atomic.AddInt64(&inflight, -1)
 				atomic.AddInt64(&processed, 1)
 			}
 		}()
@@ -81,7 +82,7 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "[*] ns-enrich stages=%s workers=%d (drain=%v follow=%v)\n",
 		strings.Join(stages, ","), *workers, *drain, *follow)
-	dispatch(ctx, st, itemCh, stages, *workers, *lease, *drain, *follow, &processed)
+	dispatch(ctx, st, itemCh, stages, *workers, *lease, *drain, *follow, &processed, &inflight)
 
 	close(itemCh)
 	wg.Wait()
@@ -94,7 +95,7 @@ func main() {
 // (follow) once the queue is empty and ingestion has finished — after a startup
 // grace, so a stale "done" from a previous run can't trigger a premature exit.
 func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkItem,
-	stages []string, batch int, lease time.Duration, drain, follow bool, processed *int64) {
+	stages []string, batch int, lease time.Duration, drain, follow bool, processed, inflight *int64) {
 
 	start := time.Now()
 	lastHB := time.Now()
@@ -108,6 +109,7 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 			}
 			got += len(items)
 			for _, it := range items {
+				atomic.AddInt64(inflight, 1)
 				select {
 				case itemCh <- it:
 				case <-ctx.Done():
@@ -116,10 +118,13 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 			}
 		}
 		if got == 0 {
-			if drain {
+			// Only conclude the queue is drained when nothing is in flight either:
+			// a busy worker may still enqueue downstream stages (light -> webinfo/ptr).
+			idle := atomic.LoadInt64(inflight) == 0
+			if idle && drain {
 				return
 			}
-			if follow && time.Since(start) > 3*time.Second {
+			if idle && follow && time.Since(start) > 3*time.Second {
 				if v, _ := st.GetMeta(ctx, store.MetaIngestState); v == store.IngestDone {
 					return
 				}
