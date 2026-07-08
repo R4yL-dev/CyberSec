@@ -22,7 +22,8 @@ These are load-bearing architectural decisions. New work must preserve them.
    an optional `--db` (so `ns-status` shows a unified view); without `--db` it stays a pure NDJSON
    pipe. Writing a `runs` heartbeat is the only store access it is allowed — never `work`/`hosts`.
 3. **Work-queue stages belong to domain B only.** A "stage" is a string in `work.stage`
-   (`model.StageLight`, and future `recheck`/`heavy`).
+   (`model.StageDetect` — the entry palier — then `webinfo`/`crawl`/`tls-deep`/`ptr`, and future
+   `recheck`/`heavy`).
 4. **All store writes go through the single-writer connection** (`SetMaxOpenConns(1)` in
    `internal/store/sqlite.go`). This is what prevents `database is locked`. Do not open a second
    writer.
@@ -41,9 +42,10 @@ These are load-bearing architectural decisions. New work must preserve them.
 
 Built and verified: `target` (reserved exclusion + randomizing permutation), `ns-discover`
 (connect + stateless SYN), the SQLite `store` with full re-entrance (claim/lease, dedup,
-backoff, dead-letter, reschedule), `ns-ingest`, the `light` enrichment palier, `ns-enrich`
-worker, `ns-status`, the `netscan` launcher, `Makefile`, and `scripts/syn-scan.sh`. See the
-README for details.
+backoff, dead-letter, reschedule), `ns-ingest`, the modular enrichment **pipeline**
+(`detect` → `webinfo`/`crawl`/`tls-deep`/`ptr`, protocol-gated), GeoIP annotation at ingest,
+`ns-enrich` worker, `ns-status`, the `netscan` launcher, `Makefile`, and `scripts/syn-scan.sh`.
+See the README for details.
 
 ---
 
@@ -63,7 +65,7 @@ and never consumes the queue).
 
 **Design.** A new `Enricher` whose `Enrich` does a targeted TCP connect to the host's known ports
 (reuse the dial logic from `scan.ConnectProber`), and either refreshes `open_ports` or records an
-"unreachable" status. On success it may `Reschedule` the host to `light` (or the next palier).
+"unreachable" status. On success it may `Reschedule` the host to `detect` (or the next palier).
 
 **Code seams.**
 - Add `StageRecheck = "recheck"` to `internal/model/model.go`.
@@ -92,14 +94,23 @@ IP-only attributes annotate at ingest, not via the queue. **`crawl`** (well-know
 paths, signature-guarded, + OPTIONS methods) is done, gated on an HTTP response. **Service/version
 extraction** is done as a webinfo analyzer: normalized `Service{product,version,cpe,source}` on
 `PortInfo.Services`, parsed from Server/X-Powered-By/generator with best-effort CPE — the CVE
-foundation. **Remaining:** `recheck` and config-file-driven wiring — all on this pattern.
+foundation.
+
+**Detection layer** ✅ done — the HTTP-centric triage was replaced by a protocol-aware `detect`
+palier (`internal/enrich/detect.go`): per port it peeks for a speak-first banner, then TLS
+handshake (**any port**, definitive), then plaintext HTTP, filling `PortInfo.Protocol`
+(`http/https/tls/ssh/ftp/smtp/banner/unknown`), TLS summary, banner + service. Port only hints
+probe order; **HTTPS on 8443 and SSH on 2222 are now detected**. Selectors gate on protocol
+(`IsWeb`, `HasTLS` any-port); the old `banner` palier was folded into `detect`; `light` removed.
+
+**Remaining:** `recheck` and config-file-driven wiring — all on this pattern.
 
 ## CVE chain (the end goal — sort/filter hosts by CVE)
 
 **Status:** foundation + banners done — `PortInfo.Services` with CPEs, fed by the web analyzer
-(Server/X-Powered-By/generator) **and** the `banner` palier (server-speaks-first SSH/FTP/SMTP/DB…,
-gated `HasNonHTTP`). Next:
-- **More banner parsers / light probes** if coverage needs it (v1 is server-speaks-first only).
+(Server/X-Powered-By/generator) **and** banner parsing in the `detect` palier (server-speaks-first
+SSH/FTP/SMTP/DB…). Next:
+- **More banner parsers / probes** if coverage needs it (v1 is server-speaks-first only).
 - **CVE matching**: ingest NVD, match `Service.CPE` + version ranges → CVE list per host; then a
   query/filter surface (`ns-status`/`ns-query`) to sort hosts by CVE. Big separate step — the
   `Service.CPE` data it consumes is now in place.
@@ -314,7 +325,7 @@ Lower-priority and **not** yet agreed in detail — capture only, do not treat a
 - **Pluggable output sinks** beyond the store (e.g. JSON file / Elasticsearch) behind a `Sink`-style
   interface.
 - **Richer HTTP fidelity** (take `Server`/`title` from the first hop rather than the final
-  response; configurable TLS ports instead of the hardcoded `{443}`).
+  response). *(TLS-on-any-port is now handled by the `detect` layer.)*
 - **Launcher-owned live display** — make `netscan scan` suppress the sub-binaries' stderr and
   render its own single unified progress line (read from the store), instead of pointing users at
   `ns-status --interval` in another pane. This is the clean way to get inline progress *inside the
