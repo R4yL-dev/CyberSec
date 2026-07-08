@@ -33,6 +33,7 @@ func main() {
 	lease := flag.Duration("lease", 2*time.Minute, "work item lease duration")
 	backoff := flag.Duration("backoff", 5*time.Second, "base retry backoff")
 	drain := flag.Bool("drain", false, "exit once the queue is empty instead of polling")
+	follow := flag.Bool("follow", false, "keep draining until ingestion is done, then exit")
 	flag.Parse()
 	if *dbPath == "" {
 		fatal("--db is required")
@@ -67,8 +68,8 @@ func main() {
 		}()
 	}
 
-	fmt.Fprintf(os.Stderr, "[*] ns-enrich stage=%s workers=%d (drain=%v)\n", *stage, *workers, *drain)
-	dispatch(ctx, st, itemCh, *stage, *workers, *lease, *drain, &processed)
+	fmt.Fprintf(os.Stderr, "[*] ns-enrich stage=%s workers=%d (drain=%v follow=%v)\n", *stage, *workers, *drain, *follow)
+	dispatch(ctx, st, itemCh, *stage, *workers, *lease, *drain, *follow, &processed)
 
 	close(itemCh)
 	wg.Wait()
@@ -76,11 +77,14 @@ func main() {
 	fmt.Fprintf(os.Stderr, "[+] enriched %d host(s)\n", atomic.LoadInt64(&processed))
 }
 
-// dispatch claims batches of work and feeds them to the worker pool until the
-// context is cancelled or (in drain mode) the queue is empty.
+// dispatch claims batches of work and feeds them to the worker pool. It returns
+// when the context is cancelled, or (drain) on the first empty queue, or
+// (follow) once the queue is empty and ingestion has finished. A startup grace
+// prevents follow mode from exiting on a stale "done" before ingest has begun.
 func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkItem,
-	stage string, batch int, lease time.Duration, drain bool, processed *int64) {
+	stage string, batch int, lease time.Duration, drain, follow bool, processed *int64) {
 
+	start := time.Now()
 	lastHB := time.Now()
 	for ctx.Err() == nil {
 		items, err := st.Claim(ctx, stage, batch, lease)
@@ -91,6 +95,11 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 		if len(items) == 0 {
 			if drain {
 				return
+			}
+			if follow && time.Since(start) > 3*time.Second {
+				if v, _ := st.GetMeta(ctx, store.MetaIngestState); v == store.IngestDone {
+					return
+				}
 			}
 			select {
 			case <-time.After(500 * time.Millisecond):

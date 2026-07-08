@@ -38,6 +38,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Publish "running" so a following ns-enrich keeps draining until we finish.
+	_ = st.SetMeta(ctx, store.MetaIngestState, store.IngestRunning)
+
 	var n int64
 	stopHB := heartbeat(ctx, st, &n)
 
@@ -54,6 +57,10 @@ func main() {
 	fmt.Fprintf(os.Stderr, "[+] ingested %d host(s)\n", atomic.LoadInt64(&n))
 	if err != nil && ctx.Err() == nil {
 		fatal("ingest: %v", err)
+	}
+	// Signal completion only on a clean finish (all input consumed).
+	if err == nil && ctx.Err() == nil {
+		_ = st.SetMeta(context.Background(), store.MetaIngestState, store.IngestDone)
 	}
 }
 
