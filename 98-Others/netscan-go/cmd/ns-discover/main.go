@@ -237,11 +237,24 @@ func main() {
 		_ = clearCheckpoint(st)
 	}
 
-	fmt.Fprintf(os.Stderr, "[+] %d host(s) with open ports in %s\n",
-		atomic.LoadInt64(&found), time.Since(start).Round(time.Millisecond))
+	elapsed := time.Since(start)
+	avgPPS := 0.0
+	if s := elapsed.Seconds(); s > 0 {
+		avgPPS = float64(atomic.LoadInt64(&scanned)) / s
+	}
+	fmt.Fprintf(os.Stderr, "[+] %d host(s) found | %s probes in %s (~%.0f pps)\n",
+		atomic.LoadInt64(&found), fmtx.Count(uint64(atomic.LoadInt64(&scanned))), fmtx.Duration(elapsed), avgPPS)
+	if *dbPath != "" && runErr == nil {
+		fmt.Fprintf(os.Stderr, "    details: ns-status --db %s\n", *dbPath)
+	}
 	if runErr != nil {
 		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "[*] interrupted")
+			if st != nil {
+				pct := 100 * float64(atomic.LoadUint64(&pos)) / float64(space.Total())
+				fmt.Fprintf(os.Stderr, "[*] interrupted at ~%.1f%% — resume with the same command + --resume\n", pct)
+			} else {
+				fmt.Fprintln(os.Stderr, "[*] interrupted (no --db, so nothing to resume — add --db next time)")
+			}
 		} else {
 			fatal("%v", runErr)
 		}

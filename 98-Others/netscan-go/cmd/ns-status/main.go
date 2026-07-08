@@ -18,6 +18,7 @@ import (
 	"sort"
 	"time"
 
+	"netscan/internal/fmtx"
 	"netscan/internal/store"
 )
 
@@ -106,9 +107,15 @@ func printDashboard(s store.Stats, prev map[string]sample) {
 		pps, live := rate(*r)
 		pct := ""
 		if r.Total > 0 {
-			pct = fmt.Sprintf(" %.1f%% (%d/%d)", 100*float64(r.Counter)/float64(r.Total), r.Counter, r.Total)
+			pct = fmt.Sprintf(" %.1f%% (%s/%s)", 100*float64(r.Counter)/float64(r.Total),
+				fmtx.Count(uint64(r.Counter)), fmtx.Count(uint64(r.Total)))
 		}
-		fmt.Printf("discovery :%s%s  %s\n", pct, rateStr(pps, live, "pps"), r.Note)
+		eta := ""
+		if live && pps > 0 && r.Total > r.Counter {
+			remaining := time.Duration(float64(r.Total-r.Counter)/pps) * time.Second
+			eta = "  ETA " + fmtx.Duration(remaining)
+		}
+		fmt.Printf("discovery :%s%s  %s%s\n", pct, rateStr(pps, live, "pps"), r.Note, eta)
 	}
 	if r, ok := findRun(s.Runs, "ns-ingest"); ok {
 		v, live := rate(*r)
