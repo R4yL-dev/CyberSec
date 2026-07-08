@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -98,15 +99,28 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `
 
+// unionPorts merges two port lists into a sorted, de-duplicated slice.
+func unionPorts(a, b []uint16) []uint16 {
+	set := make(map[uint16]struct{}, len(a)+len(b))
+	for _, p := range a {
+		set[p] = struct{}{}
+	}
+	for _, p := range b {
+		set[p] = struct{}{}
+	}
+	out := make([]uint16, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 func nowMS() int64          { return time.Now().UnixMilli() }
 func ms(t time.Time) int64  { return t.UnixMilli() }
 func fromMS(v int64) time.Time { return time.UnixMilli(v).UTC() }
 
 func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string) error {
-	ports, err := json.Marshal(rec.OpenPorts)
-	if err != nil {
-		return err
-	}
 	now := ms(rec.DiscoveredAt)
 	if now == 0 {
 		now = nowMS()
@@ -117,6 +131,27 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string)
 		return err
 	}
 	defer tx.Rollback()
+
+	// Union the new open ports with any already recorded — SYN discovery streams
+	// a host's ports in separate records, so re-ingest must accumulate, not replace.
+	merged := rec.OpenPorts
+	var existing string
+	switch err := tx.QueryRowContext(ctx, `SELECT open_ports FROM hosts WHERE ip=?`,
+		rec.IP.String()).Scan(&existing); err {
+	case nil:
+		var prev []uint16
+		if json.Unmarshal([]byte(existing), &prev) == nil {
+			merged = unionPorts(prev, rec.OpenPorts)
+		}
+	case sql.ErrNoRows:
+		// new host
+	default:
+		return err
+	}
+	ports, err := json.Marshal(merged)
+	if err != nil {
+		return err
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO hosts(ip, open_ports, first_seen, last_seen)
