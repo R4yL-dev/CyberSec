@@ -18,6 +18,13 @@ func IsWeb(h *model.HostRecord) bool {
 	return false
 }
 
+// NeedsPortscan passes if the deep port scan hasn't run yet (loop guard for the
+// portscan → detect re-entry: portscan runs at most once per host).
+func NeedsPortscan(h *model.HostRecord) bool {
+	_, done := h.Status[model.StagePortscan]
+	return !done
+}
+
 // HasTLS passes if any port completed a TLS handshake (on any port, not just
 // 443) — detect records a cert summary whenever TLS is present.
 func HasTLS(h *model.HostRecord) bool {

@@ -5,8 +5,26 @@ package model
 
 import (
 	"net/netip"
+	"sort"
 	"time"
 )
+
+// unionPorts merges two port lists into a sorted, de-duplicated slice.
+func unionPorts(a, b []uint16) []uint16 {
+	set := make(map[uint16]struct{}, len(a)+len(b))
+	for _, p := range a {
+		set[p] = struct{}{}
+	}
+	for _, p := range b {
+		set[p] = struct{}{}
+	}
+	out := make([]uint16, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
 
 // Stage names for the domain-B work queue — one per enrichment palier. New
 // paliers add a constant here and an entry in internal/pipeline.
@@ -16,6 +34,7 @@ const (
 	StagePTR     = "ptr"      // reverse DNS
 	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
 	StageCrawl   = "crawl"    // well-known + sensitive paths + HTTP methods
+	StagePortscan = "portscan" // deep per-host port sweep (opt-in)
 )
 
 // Detected L7 protocol for a port, set by the detect palier.
@@ -67,6 +86,11 @@ type GeoInfo struct {
 // can combine updates from paliers that ran concurrently on the same host
 // without one clobbering the other. Only non-empty incoming fields win.
 func (h *HostRecord) Merge(in *HostRecord) {
+	// Union open ports: the portscan palier discovers ports beyond discovery, and
+	// Complete re-reads + merges — without this those new ports would be dropped.
+	if len(in.OpenPorts) > 0 {
+		h.OpenPorts = unionPorts(h.OpenPorts, in.OpenPorts)
+	}
 	if h.Ports == nil {
 		h.Ports = make(map[uint16]*PortInfo, len(in.Ports))
 	}
