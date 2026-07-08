@@ -95,7 +95,34 @@ func main() {
 		fmt.Fprintln(os.Stderr, "[!] rate=0 (unlimited) — watch your connectivity; Ctrl-C if DNS stalls")
 	}
 
+	sig := space.Signature()
+
+	// Open the optional progress/checkpoint store up front (also used for --resume).
+	var st *store.SQLite
+	if *dbPath != "" {
+		st, err = store.Open(*dbPath)
+		if err != nil {
+			fatal("open store: %v", err)
+		}
+		defer st.Close()
+	}
+
 	seed := pickSeed(*seedFlag)
+	var startPos uint64
+	if *resume {
+		if st == nil {
+			fatal("--resume requires --db")
+		}
+		ck, ok, cerr := loadCheckpoint(st, sig)
+		if cerr != nil {
+			fatal("resume: %v", cerr)
+		}
+		if !ok {
+			fatal("--resume: no checkpoint to resume in %s (already finished, or none written yet)", *dbPath)
+		}
+		seed, startPos = ck.Seed, ck.Pos
+		fmt.Fprintf(os.Stderr, "[*] resume  : from position %d / %d (seed=%d)\n", startPos, space.Total(), seed)
+	}
 
 	// Connect mode: lift the FD limit and size the worker pool so it can actually
 	// sustain --rate (throughput ~= workers/timeout), bounded by available FDs.
@@ -123,6 +150,7 @@ func main() {
 	// --rate; progTotal is the total probe count = addresses x ports (x retries
 	// for SYN passes). The percentage is identical to address progress.
 	var scanned, found int64
+	var pos uint64 // current permutation position, for checkpointing / resume
 	progTotal := space.Total() * uint64(len(ports))
 
 	var prober scan.Prober
@@ -155,16 +183,11 @@ func main() {
 	fmt.Fprintf(os.Stderr, "[*] ports   : %s | mode=%s | rate=%.0f pps | workers=%d\n",
 		*portsFlag, *mode, *ratePPS, effWorkers)
 
-	// Optional progress reporting into the store (read by ns-status). Discover
-	// only writes its own heartbeat here — it never touches the work queue.
+	// Progress + checkpoint reporting into the store (read by ns-status). Discover
+	// only writes its own heartbeat/checkpoint here — it never touches the work queue.
 	var progStop func()
-	if *dbPath != "" {
-		st, err := store.Open(*dbPath)
-		if err != nil {
-			fatal("open store: %v", err)
-		}
-		defer st.Close()
-		progStop = startProgress(st, progTotal, &scanned, &found)
+	if st != nil {
+		progStop = startProgress(st, progTotal, &scanned, &found, sig, seed, &pos, space.Total())
 	}
 
 	// Encode discovered hosts to stdout while the prober runs, flushing each one
@@ -186,11 +209,15 @@ func main() {
 	}()
 
 	start := time.Now()
-	runErr := prober.Run(ctx, space.Randomized(seed), out)
+	runErr := prober.Run(ctx, space.RandomizedFrom(seed, startPos, &pos), out)
 	close(out)
 	<-encDone
 	if progStop != nil {
 		progStop()
+	}
+	// Finished cleanly — drop the checkpoint so a later --resume has nothing to do.
+	if st != nil && runErr == nil && ctx.Err() == nil {
+		_ = clearCheckpoint(st)
 	}
 
 	fmt.Fprintf(os.Stderr, "[+] %d host(s) with open ports in %s\n",
