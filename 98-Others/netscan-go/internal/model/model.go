@@ -84,10 +84,33 @@ func (h *HostRecord) Merge(in *HostRecord) {
 
 // PortInfo accumulates what each palier learns about a single open port.
 type PortInfo struct {
-	Port uint16    `json:"port"`
-	HTTP *HTTPInfo `json:"http,omitempty"`
-	TLS  *TLSInfo  `json:"tls,omitempty"`
-	Web  *WebInfo  `json:"web,omitempty"`
+	Port    uint16       `json:"port"`
+	HTTP    *HTTPInfo    `json:"http,omitempty"`
+	TLS     *TLSInfo     `json:"tls,omitempty"`
+	Web     *WebInfo     `json:"web,omitempty"`
+	TLSDeep *TLSDeepInfo `json:"tls_deep,omitempty"`
+}
+
+// TLSDeepInfo holds the derived results of the tls-deep palier: supported
+// versions, negotiated cipher per version, the full cert chain, a JARM
+// fingerprint, and weak-crypto warnings.
+type TLSDeepInfo struct {
+	Versions []string          `json:"versions,omitempty"`
+	Ciphers  map[string]string `json:"ciphers,omitempty"` // version -> negotiated cipher
+	Chain    []CertSummary     `json:"chain,omitempty"`
+	JARM     string            `json:"jarm,omitempty"`
+	Warnings []string          `json:"warnings,omitempty"`
+	Error    string            `json:"error,omitempty"`
+}
+
+// CertSummary is one certificate in the chain.
+type CertSummary struct {
+	SubjectCN  string `json:"subject_cn,omitempty"`
+	Issuer     string `json:"issuer,omitempty"`
+	NotBefore  string `json:"not_before,omitempty"`
+	NotAfter   string `json:"not_after,omitempty"`
+	SelfSigned bool   `json:"self_signed,omitempty"`
+	Expired    bool   `json:"expired,omitempty"`
 }
 
 // WebInfo holds the derived results of the webinfo palier (a richer HTTP fetch
