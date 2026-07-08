@@ -264,7 +264,10 @@ func main() {
 	}
 }
 
-const workerHardCap = 4096
+// workerHardCap bounds auto-sizing so a pathological rate can't spawn millions
+// of goroutines. It lifts the connect ceiling to ~10k pps at the default 1.5s
+// timeout; past that, use --mode syn. The real limit is usually the FD budget.
+const workerHardCap = 16384
 
 // autoWorkers picks the connect worker count. An explicit value (>0) wins.
 // Otherwise it targets rate x timeout concurrent dials (what it takes to sustain
