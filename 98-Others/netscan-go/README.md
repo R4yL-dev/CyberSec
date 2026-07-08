@@ -149,7 +149,9 @@ sudo apt install -y libpcap-dev      # only if you want SYN mode
 **Make targets** (`make help` lists them):
 
 ```bash
-make build      # compile all four binaries into bin/ (no sudo)
+make build      # compile all four binaries into bin/ (no sudo, no network)
+make setup      # build + geoip (first-time "give me everything", no sudo)
+make geoip      # download the free DB-IP lite country+ASN databases into data/ (idempotent)
 make syn        # build, then grant the SYN capability (build + setcap) in one step
 make setcap     # grant CAP_NET_RAW to bin/ns-discover (sudo)
 make dropcap    # remove that capability
@@ -158,6 +160,9 @@ make test       # go test ./...
 make vet
 make clean
 ```
+
+The GeoIP database is a data file in `data/` that **persists across rebuilds** (unlike the SYN
+capability) — run `make geoip` once, or monthly to refresh.
 
 **Capabilities (SYN mode).** SYN scanning needs to open raw sockets and capture packets. Rather
 than running as root, grant the single binary two narrow file capabilities:
@@ -340,6 +345,12 @@ light ──RespondedHTTP──▶ webinfo
 - **`tls-deep`** (gated on TLS): supported TLS versions + negotiated cipher per version, full cert
   chain, weak-crypto warnings, and a **JARM** active fingerprint (~15 handshakes, hence gated).
 - **`ptr`** (always): reverse DNS.
+
+**GeoIP / ASN** is not a palier — it's a purely local lookup on the IP, done at **ingest** and
+stored on the host (`geo`). It is **on by default when a database is present**: run `make geoip`
+(downloads the free, account-free DB-IP lite country + ASN `.mmdb` into `data/`, CC BY db.ip.com),
+and `netscan scan` auto-uses them. Override with `--geoip <file.mmdb> --asn <file.mmdb>` or disable
+with `--geoip ""`; a missing DB is skipped silently. MaxMind GeoLite2 files work too (same format).
 
 Concurrent paliers on the same host can't clobber each other: `store.Complete` re-reads and
 **merges** under the single-writer lock (`HostRecord.Merge`).
