@@ -287,8 +287,23 @@ stages:
   webinfo: {}
 ```
 
-Selectors are named (`always`, `is_web`, `has_tls`); enrichers/stages are `detect`, `webinfo`,
-`crawl`, `tls-deep`, `ptr`. `Load` validates the graph (entry present, known names, edges resolve).
+Selectors are named (`always`, `is_web`, `has_tls`, `needs_portscan`); enrichers/stages are
+`detect`, `webinfo`, `crawl`, `tls-deep`, `ptr`, `portscan`. `Load` validates the graph (entry
+present, known names, edges resolve).
+
+**Deep per-host port scan (`portscan`).** Discovery scans a small common port set across the whole
+address space (fast); the `portscan` palier then sweeps a host's ports (the slow, per-host phase).
+It's **opt-in** via the `profiles/deep.yaml` profile and the most aggressive palier (many connects
+per host — heavy on NAT):
+
+```bash
+netscan scan --targets 1.1.1.0/24 --db scan.db --pipeline profiles/deep.yaml --ports-deep all
+```
+
+`--ports-deep` is `all` (1-65535), a spec like `1-1024,3306,8000-8100`, or empty (a curated common
+set). Newly-found ports are unioned into the host and **re-classified/enriched by re-entering
+`detect`** (the `portscan → detect` edge; the `needs_portscan` guard runs portscan once).
+`ns-discover --top-ports N` scans the N most common ports for the discovery phase.
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
 rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.
