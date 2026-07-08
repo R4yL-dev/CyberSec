@@ -42,9 +42,6 @@ func (p *ConnectProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out
 			defer wg.Done()
 			for addr := range addrCh {
 				open := p.scanHost(ctx, addr)
-				if p.Progress != nil {
-					atomic.AddInt64(p.Progress, 1)
-				}
 				if len(open) == 0 {
 					continue
 				}
