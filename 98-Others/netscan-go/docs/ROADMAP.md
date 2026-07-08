@@ -115,30 +115,12 @@ SSH/FTP/SMTP/DB…). Next:
   query/filter surface (`ns-status`/`ns-query`) to sort hosts by CVE. Big separate step — the
   `Service.CPE` data it consumes is now in place.
 
-**What.** Additional, heavier enrichment stages beyond `light` (e.g. full-body fetch and
-crawling, deeper certificate/chain analysis, tech fingerprinting), each gated by a **selector**
-so expensive work runs only on interesting hosts (tiered enrichment).
-
-**Why.** We deliberately shipped only the cheap `light` palier in v1 but designed the
-architecture to grow: discovery (tier 0) → light HTTP/TLS (tier 1) → heavy analysis (tier 2),
-where a selector decides which hosts advance (e.g. only `200 OK`, or only a given `Server`).
-`HostRecord.Ports` accumulates so each tier adds information without discarding earlier tiers.
-
-**Design.** Model a pipeline as an ordered list of stages, each = `{Enricher, Select func(*HostRecord) bool, next stage}`.
-After a worker `Complete`s an item, if the stage has a `next` and `Select(host)` passes, it
-`Reschedule`s the host onto the next stage. Enrichment thus advances **through the queue**
-(preserving re-entrance and crash recovery), not via in-process chaining. The `light` completion
-would, for example, enqueue `heavy` for hosts whose HTTP status is 200.
-
-**Code seams.**
-- `internal/enrich/enricher.go` already defines `Enricher` and `Selector` — wire `Selector` in.
-- Add stage constants in `internal/model/model.go`.
-- New enricher modules `internal/enrich/heavy.go` etc.
-- `cmd/ns-enrich/main.go`: after `store.Complete`, consult a stage→(selector,next) config and
-  `store.Reschedule` to `next` when the selector passes. Keep the config small and explicit.
-
-**Done when.** Running `ns-enrich --stage light` auto-advances qualifying hosts to `heavy`, and
-`ns-enrich --stage heavy` (possibly a separate process/worker) enriches only those hosts.
+**Mechanism (built).** The pipeline is an edge-gated graph (`internal/pipeline/pipeline.go`):
+each `Stage{Enricher, Next []Edge}`, each `Edge{To, When Selector}`. After a worker `Complete`s an
+item, it `Reschedule`s the host onto each `Next` stage whose selector passes — advancing **through
+the queue** (re-entrant, crash-safe), never by in-process chaining. Add a new palier = a new
+`Enricher` + a `model.Stage*` constant + a stage/edge in `pipeline.Default`; add an analyzer = a
+function under `internal/enrich`. Concurrent paliers merge via `store.Complete`/`HostRecord.Merge`.
 
 ---
 
