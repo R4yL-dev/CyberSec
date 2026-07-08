@@ -209,6 +209,10 @@ SRC_PORT=55555 ./netscan scan --targets 1.1.1.0/24 --syn --db scan.db   # pin th
 
 Under `--syn`, the launcher calls `scripts/syn-scan.sh`, which checks the capability and wraps
 the scan in a **scoped, auto-removed iptables guard** (see [How it works](#the-kernel-rst-pitfall)).
+It asks for your sudo password **once** (only for iptables — the scan runs unprivileged via the
+capability) and keeps that credential fresh so the cleanup at the end never re-prompts, even on a
+multi-hour scan. If a SYN scan is ever hard-killed before it can clean up, remove any leftover
+guard with `netscan iptables-clean`.
 
 **Composing the raw binaries** (streaming / long-running enrichment):
 
