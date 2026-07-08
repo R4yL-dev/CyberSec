@@ -240,7 +240,8 @@ guard with `netscan iptables-clean`.
 | `--exclude`          | —          | Comma-separated CIDRs to exclude.                           |
 | `--exclude-file`     | —          | File of CIDRs to exclude.                                   |
 | `--no-skip-reserved` | `false`    | Do **not** skip reserved/private ranges.                   |
-| `--ports`            | `80,443`   | Comma-separated ports.                                      |
+| `--ports`            | —          | Comma-separated ports; overrides `--top-ports` when set.    |
+| `--top-ports`        | `100`      | Scan the N most common ports (the discovery default; a host is found only if one of these is open, so a narrow set misses non-web-only hosts). |
 | `--mode`             | `connect`  | `connect` or `syn`.                                        |
 | `--rate`             | `1000`     | Max probes per second (`0` = unlimited).                   |
 | `--workers`          | `-1` (auto)| Connect concurrency. Auto = `rate × timeout`, bounded by the FD limit and 4096; set `>0` to override. Reaching high rates needs this many concurrent dials — SYN mode avoids the ceiling. |
@@ -399,7 +400,7 @@ detect ──IsWeb───▶ webinfo
 
 Non-web service banners (SSH/FTP/SMTP/MySQL…) are grabbed by `detect` itself and parsed into a
 `Service` (source `banner`, with a CPE when known). To reach them, scan the relevant ports (e.g.
-`--ports 22,21,25,3306,...`) — the default `80,443,8080` is web-only.
+`--ports 22,21,25,3306,...`, or rely on the default `--top-ports 100` which includes them).
 
 **GeoIP / ASN** is not a palier — it's a purely local lookup on the IP, done at **ingest** and
 stored on the host (`geo`). It is **on by default when a database is present**: run `make geoip`
