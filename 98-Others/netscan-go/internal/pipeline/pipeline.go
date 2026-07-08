@@ -28,27 +28,24 @@ type Pipeline map[string]Stage
 
 // Default is the built-in graph:
 //
-//	light ──RespondedHTTP──▶ webinfo
-//	      ──RespondedHTTP──▶ crawl
-//	      ──HasTLS─────────▶ tls-deep
-//	      ──HasNonHTTP─────▶ banner
-//	      ──Always─────────▶ ptr
+//	detect ──IsWeb───▶ webinfo
+//	       ──IsWeb───▶ crawl
+//	       ──HasTLS──▶ tls-deep
+//	       ──Always──▶ ptr
 func Default(timeout time.Duration) Pipeline {
 	return Pipeline{
-		model.StageLight: {
-			Enricher: enrich.NewLight(timeout),
+		model.StageDetect: {
+			Enricher: enrich.NewDetect(timeout),
 			Next: []Edge{
-				{To: model.StageWebinfo, When: enrich.RespondedHTTP},
-				{To: model.StageCrawl, When: enrich.RespondedHTTP},
+				{To: model.StageWebinfo, When: enrich.IsWeb},
+				{To: model.StageCrawl, When: enrich.IsWeb},
 				{To: model.StageTLSDeep, When: enrich.HasTLS},
-				{To: model.StageBanner, When: enrich.HasNonHTTP},
 				{To: model.StagePTR, When: enrich.Always},
 			},
 		},
 		model.StageWebinfo: {Enricher: enrich.NewWebinfo(timeout)},
 		model.StageTLSDeep: {Enricher: enrich.NewTLSDeep(timeout)},
 		model.StageCrawl:   {Enricher: enrich.NewCrawl(timeout)},
-		model.StageBanner:  {Enricher: enrich.NewBanner(timeout)},
 		model.StagePTR:     {Enricher: enrich.NewPTR()},
 	}
 }

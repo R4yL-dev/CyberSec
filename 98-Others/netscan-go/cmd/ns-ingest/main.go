@@ -58,7 +58,7 @@ func main() {
 	stopHB := heartbeat(ctx, st, &n)
 
 	err = stream.Decode(os.Stdin, func(rec model.WireRecord) error {
-		if err := st.Ingest(ctx, rec, model.StageLight, geo.Annotate(rec.IP)); err != nil {
+		if err := st.Ingest(ctx, rec, model.StageDetect, geo.Annotate(rec.IP)); err != nil {
 			return err
 		}
 		atomic.AddInt64(&n, 1)

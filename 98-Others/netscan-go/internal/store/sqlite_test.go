@@ -33,10 +33,10 @@ func TestIngestClaimHost(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	if err := s.Ingest(ctx, rec("1.1.1.1", 80, 443), model.StageLight, nil); err != nil {
+	if err := s.Ingest(ctx, rec("1.1.1.1", 80, 443), model.StageDetect, nil); err != nil {
 		t.Fatal(err)
 	}
-	items, err := s.Claim(ctx, model.StageLight, 10, time.Second)
+	items, err := s.Claim(ctx, model.StageDetect, 10, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,10 +61,10 @@ func TestIngestUnionsOpenPorts(t *testing.T) {
 	s := openTest(t)
 
 	// SYN streaming ingests a host's ports in separate records; they must union.
-	if err := s.Ingest(ctx, rec("9.9.9.9", 80), model.StageLight, nil); err != nil {
+	if err := s.Ingest(ctx, rec("9.9.9.9", 80), model.StageDetect, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Ingest(ctx, rec("9.9.9.9", 443), model.StageLight, nil); err != nil {
+	if err := s.Ingest(ctx, rec("9.9.9.9", 443), model.StageDetect, nil); err != nil {
 		t.Fatal(err)
 	}
 	h, err := s.Host(ctx, netip.MustParseAddr("9.9.9.9"))
@@ -82,15 +82,15 @@ func TestGeoPersistedAndPreserved(t *testing.T) {
 	ip := netip.MustParseAddr("1.1.1.1")
 
 	geo := &model.GeoInfo{Country: "US", ASN: 13335, Org: "Cloudflare"}
-	if err := s.Ingest(ctx, rec("1.1.1.1", 443), model.StageLight, geo); err != nil {
+	if err := s.Ingest(ctx, rec("1.1.1.1", 443), model.StageDetect, geo); err != nil {
 		t.Fatal(err)
 	}
 	// Re-ingest without geo must NOT wipe it (set once at first insert).
-	if err := s.Ingest(ctx, rec("1.1.1.1", 80), model.StageLight, nil); err != nil {
+	if err := s.Ingest(ctx, rec("1.1.1.1", 80), model.StageDetect, nil); err != nil {
 		t.Fatal(err)
 	}
 	// An enrichment Complete must preserve geo too.
-	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	items, _ := s.Claim(ctx, model.StageDetect, 1, time.Second)
 	h, _ := s.Host(ctx, ip)
 	s.Complete(ctx, items[0].ID, h)
 
@@ -105,11 +105,11 @@ func TestDedupPending(t *testing.T) {
 	s := openTest(t)
 
 	for i := 0; i < 3; i++ {
-		if err := s.Ingest(ctx, rec("2.2.2.2", 80), model.StageLight, nil); err != nil {
+		if err := s.Ingest(ctx, rec("2.2.2.2", 80), model.StageDetect, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	items, err := s.Claim(ctx, model.StageLight, 10, time.Second)
+	items, err := s.Claim(ctx, model.StageDetect, 10, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,17 +122,17 @@ func TestCompleteRemovesFromQueue(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	s.Ingest(ctx, rec("3.3.3.3", 443), model.StageLight, nil)
-	items, _ := s.Claim(ctx, model.StageLight, 10, time.Second)
+	s.Ingest(ctx, rec("3.3.3.3", 443), model.StageDetect, nil)
+	items, _ := s.Claim(ctx, model.StageDetect, 10, time.Second)
 
 	h, _ := s.Host(ctx, items[0].IP)
 	h.Ports = map[uint16]*model.PortInfo{443: {Port: 443, HTTP: &model.HTTPInfo{Status: 200}}}
-	h.Status = map[string]string{model.StageLight: "ok"}
+	h.Status = map[string]string{model.StageDetect: "ok"}
 	if err := s.Complete(ctx, items[0].ID, h); err != nil {
 		t.Fatal(err)
 	}
 
-	again, _ := s.Claim(ctx, model.StageLight, 10, time.Second)
+	again, _ := s.Claim(ctx, model.StageDetect, 10, time.Second)
 	if len(again) != 0 {
 		t.Fatalf("completed item was re-claimed: %d", len(again))
 	}
@@ -141,7 +141,7 @@ func TestCompleteRemovesFromQueue(t *testing.T) {
 	if got.Ports[443] == nil || got.Ports[443].HTTP.Status != 200 {
 		t.Fatalf("enrichment not persisted: %+v", got.Ports)
 	}
-	if got.Status[model.StageLight] != "ok" {
+	if got.Status[model.StageDetect] != "ok" {
 		t.Fatalf("status not persisted: %v", got.Status)
 	}
 }
@@ -151,15 +151,15 @@ func TestFailBackoffThenDeadLetter(t *testing.T) {
 	s := openTest(t)
 	const maxAttempts = 2
 
-	s.Ingest(ctx, rec("4.4.4.4", 80), model.StageLight, nil)
+	s.Ingest(ctx, rec("4.4.4.4", 80), model.StageDetect, nil)
 
 	// attempt 1 -> fail -> still pending (attempts 1 < max)
-	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	items, _ := s.Claim(ctx, model.StageDetect, 1, time.Second)
 	if err := s.Fail(ctx, items[0].ID, maxAttempts, 0); err != nil {
 		t.Fatal(err)
 	}
 	// attempt 2 -> fail -> dead-lettered (attempts 2 >= max)
-	items, _ = s.Claim(ctx, model.StageLight, 1, time.Second)
+	items, _ = s.Claim(ctx, model.StageDetect, 1, time.Second)
 	if len(items) != 1 || items[0].Attempts != 2 {
 		t.Fatalf("expected re-claim as attempt 2, got %+v", items)
 	}
@@ -167,7 +167,7 @@ func TestFailBackoffThenDeadLetter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if again, _ := s.Claim(ctx, model.StageLight, 1, time.Second); len(again) != 0 {
+	if again, _ := s.Claim(ctx, model.StageDetect, 1, time.Second); len(again) != 0 {
 		t.Fatalf("dead-lettered item was re-claimed: %d", len(again))
 	}
 	st, _ := s.Stats(ctx)
@@ -180,18 +180,18 @@ func TestLeaseExpiryReclaim(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	s.Ingest(ctx, rec("5.5.5.5", 80), model.StageLight, nil)
+	s.Ingest(ctx, rec("5.5.5.5", 80), model.StageDetect, nil)
 	// Claim with a tiny lease; simulate a crashed worker that never completes.
-	if items, _ := s.Claim(ctx, model.StageLight, 1, time.Millisecond); len(items) != 1 {
+	if items, _ := s.Claim(ctx, model.StageDetect, 1, time.Millisecond); len(items) != 1 {
 		t.Fatalf("first claim failed: %d", len(items))
 	}
 	// Before expiry, not claimable.
-	if items, _ := s.Claim(ctx, model.StageLight, 1, time.Second); len(items) != 0 {
+	if items, _ := s.Claim(ctx, model.StageDetect, 1, time.Second); len(items) != 0 {
 		t.Fatalf("leased item claimed before expiry: %d", len(items))
 	}
 	time.Sleep(15 * time.Millisecond)
 	// After expiry, reclaimable as a new attempt.
-	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	items, _ := s.Claim(ctx, model.StageDetect, 1, time.Second)
 	if len(items) != 1 || items[0].Attempts != 2 {
 		t.Fatalf("expired lease not reclaimed as attempt 2: %+v", items)
 	}
@@ -202,16 +202,16 @@ func TestReschedule(t *testing.T) {
 	s := openTest(t)
 	ip := netip.MustParseAddr("6.6.6.6")
 
-	s.Ingest(ctx, rec("6.6.6.6", 80), model.StageLight, nil)
-	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	s.Ingest(ctx, rec("6.6.6.6", 80), model.StageDetect, nil)
+	items, _ := s.Claim(ctx, model.StageDetect, 1, time.Second)
 	h, _ := s.Host(ctx, ip)
 	s.Complete(ctx, items[0].ID, h)
 
 	// Backward: re-arm the host for the same stage.
-	if err := s.Reschedule(ctx, ip, model.StageLight); err != nil {
+	if err := s.Reschedule(ctx, ip, model.StageDetect); err != nil {
 		t.Fatal(err)
 	}
-	again, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	again, _ := s.Claim(ctx, model.StageDetect, 1, time.Second)
 	if len(again) != 1 || again[0].IP != ip {
 		t.Fatalf("reschedule did not re-enqueue: %+v", again)
 	}
@@ -288,7 +288,7 @@ func TestConcurrentProcessesNoLock(t *testing.T) {
 			defer wg.Done()
 			// "process 1": the union path (SELECT + INSERT in one write tx), twice.
 			for _, port := range []uint16{80, 443} {
-				if err := s1.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{port}, DiscoveredAt: time.Now()}, model.StageLight, nil); err != nil {
+				if err := s1.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{port}, DiscoveredAt: time.Now()}, model.StageDetect, nil); err != nil {
 					errCh <- err
 				}
 			}
@@ -297,7 +297,7 @@ func TestConcurrentProcessesNoLock(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// "process 2": concurrent claims + completes.
-			items, err := s2.Claim(ctx, model.StageLight, 5, time.Second)
+			items, err := s2.Claim(ctx, model.StageDetect, 5, time.Second)
 			if err != nil {
 				errCh <- err
 				return
@@ -331,14 +331,14 @@ func TestConcurrentIngestClaimNoLock(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ip := netip.AddrFrom4([4]byte{10, 0, byte(i >> 8), byte(i)})
-			if err := s.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{80}, DiscoveredAt: time.Now()}, model.StageLight, nil); err != nil {
+			if err := s.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{80}, DiscoveredAt: time.Now()}, model.StageDetect, nil); err != nil {
 				errCh <- err
 			}
 		}(i)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.Claim(ctx, model.StageLight, 4, time.Second); err != nil {
+			if _, err := s.Claim(ctx, model.StageDetect, 4, time.Second); err != nil {
 				errCh <- err
 			}
 		}()
