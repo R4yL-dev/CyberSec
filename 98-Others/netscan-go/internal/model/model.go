@@ -79,6 +79,9 @@ func (h *HostRecord) Merge(in *HostRecord) {
 		if pin.Crawl != nil {
 			pe.Crawl = pin.Crawl
 		}
+		if len(pin.Services) > 0 {
+			pe.Services = pin.Services
+		}
 	}
 	if len(in.Status) > 0 {
 		if h.Status == nil {
@@ -102,8 +105,20 @@ type PortInfo struct {
 	HTTP    *HTTPInfo    `json:"http,omitempty"`
 	TLS     *TLSInfo     `json:"tls,omitempty"`
 	Web     *WebInfo     `json:"web,omitempty"`
-	TLSDeep *TLSDeepInfo `json:"tls_deep,omitempty"`
-	Crawl   *CrawlInfo   `json:"crawl,omitempty"`
+	TLSDeep  *TLSDeepInfo `json:"tls_deep,omitempty"`
+	Crawl    *CrawlInfo   `json:"crawl,omitempty"`
+	Services []Service    `json:"services,omitempty"`
+}
+
+// Service is a normalized product+version identity for a port, the CVE-ready
+// unit. CPE is cpe:2.3:a:vendor:product:version when the product is known;
+// Source records where it came from (http-server | x-powered-by | generator |
+// banner later).
+type Service struct {
+	Product string `json:"product"`
+	Version string `json:"version,omitempty"`
+	CPE     string `json:"cpe,omitempty"`
+	Source  string `json:"source"`
 }
 
 // CrawlInfo holds the derived results of the crawl palier: which probed paths
