@@ -237,6 +237,65 @@ func TestMetaAndHeartbeatTotal(t *testing.T) {
 	}
 }
 
+// TestConcurrentProcessesNoLock reproduces the cross-process write contention
+// that a single-connection test misses: two store handles (like ns-ingest and
+// ns-enrich) hammering writes on the same file. Ingest's read-then-write union
+// must not fail with SQLITE_BUSY (requires the writer's BEGIN IMMEDIATE).
+func TestConcurrentProcessesNoLock(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "c.db")
+	s1, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Close()
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 400)
+	for i := 0; i < 100; i++ {
+		ip := netip.AddrFrom4([4]byte{10, 1, byte(i >> 8), byte(i)})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// "process 1": the union path (SELECT + INSERT in one write tx), twice.
+			for _, port := range []uint16{80, 443} {
+				if err := s1.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{port}, DiscoveredAt: time.Now()}, model.StageLight); err != nil {
+					errCh <- err
+				}
+			}
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// "process 2": concurrent claims + completes.
+			items, err := s2.Claim(ctx, model.StageLight, 5, time.Second)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			for _, it := range items {
+				if h, err := s2.Host(ctx, it.IP); err != nil {
+					errCh <- err
+				} else if h != nil {
+					if err := s2.Complete(ctx, it.ID, h); err != nil {
+						errCh <- err
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("concurrent op failed (database locked?): %v", err)
+	}
+}
+
 func TestConcurrentIngestClaimNoLock(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
