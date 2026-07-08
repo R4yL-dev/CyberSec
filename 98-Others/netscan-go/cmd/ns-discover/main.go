@@ -107,10 +107,11 @@ func main() {
 		limiter = rate.NewLimiter(rate.Limit(*ratePPS), burst)
 	}
 
-	// scanned counts addresses actually probed (not merely queued); progTotal is
-	// its denominator (SYN sends `retries` passes, so its total is multiplied).
+	// scanned counts probes actually sent (dials / SYNs), so its rate matches
+	// --rate; progTotal is the total probe count = addresses x ports (x retries
+	// for SYN passes). The percentage is identical to address progress.
 	var scanned, found int64
-	progTotal := space.Total()
+	progTotal := space.Total() * uint64(len(ports))
 
 	var prober scan.Prober
 	switch *mode {
@@ -128,7 +129,7 @@ func main() {
 		}
 		sp := scan.NewSYNProber(ports, *retries, *grace, uint16(*synSrcPort), limiter)
 		sp.Progress = &scanned
-		progTotal = space.Total() * uint64(max(*retries, 1))
+		progTotal = space.Total() * uint64(len(ports)) * uint64(max(*retries, 1))
 		fmt.Fprintf(os.Stderr, "[*] syn     : src-port=%d (scope iptables RST rule to this port)\n", sp.SrcPort())
 		prober = sp
 	default:
