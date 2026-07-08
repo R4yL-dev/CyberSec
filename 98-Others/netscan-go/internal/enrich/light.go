@@ -32,8 +32,17 @@ type Light struct {
 	MaxRedirects int
 }
 
+// lightTimeoutCap bounds the triage probe: light is the cheap entry palier, so
+// it should not burn the full (deep-palier) timeout on a silent/non-web port.
+// 5s covers virtually any responsive web server; the rare web server slower than
+// this to first byte won't be classified as web (acceptable triage tradeoff).
+const lightTimeoutCap = 5 * time.Second
+
 // NewLight returns a Light enricher with sensible defaults (64 KiB body cap).
 func NewLight(timeout time.Duration) *Light {
+	if timeout > lightTimeoutCap {
+		timeout = lightTimeoutCap
+	}
 	return &Light{Timeout: timeout, MaxBody: 64 << 10, MaxRedirects: 10}
 }
 
@@ -45,6 +54,9 @@ func (l *Light) Enrich(ctx context.Context, host *model.HostRecord) error {
 	}
 	for _, port := range host.OpenPorts {
 		pi := &model.PortInfo{Port: port}
+		// probeHTTP returns nil when the port produced no HTTP response at all
+		// (connection error / timeout / non-HTTP) — leaving HTTP nil keeps the
+		// record clean and routes the port to the banner palier via HasNonHTTP.
 		pi.HTTP = l.probeHTTP(ctx, host.IP, port)
 		if tlsPorts[port] {
 			pi.TLS = l.probeTLS(host.IP, port)
@@ -89,14 +101,13 @@ func (l *Light) probeHTTP(ctx context.Context, ip netip.Addr, port uint16) *mode
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		info.Error = err.Error()
-		return info
+		return nil // malformed request; nothing usable
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		info.Error = err.Error()
-		info.Redirects = redirects
-		return info
+		// No HTTP response (timeout / connection reset / non-HTTP service like
+		// SSH). Don't record a misleading http block; let banner handle the port.
+		return nil
 	}
 	defer resp.Body.Close()
 
