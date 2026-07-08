@@ -16,9 +16,11 @@ These are load-bearing architectural decisions. New work must preserve them.
 
 1. **Two domains.** Domain A = discovery (a forward-only stream, `ns-discover`, NDJSON out).
    Domain B = enrichment (a re-entrant work queue + per-host state in SQLite).
-2. **`ns-discover` is forward-only and never reads the work queue.** There is deliberately **no
+2. **`ns-discover` is forward-only and never touches the work queue.** There is deliberately **no
    `discover` stage** in the `work` table. All per-host re-probing lives in domain B (see the
-   `recheck` stage, §1).
+   `recheck` stage, §1). It *may* write its own progress heartbeat to the `runs` table when given
+   an optional `--db` (so `ns-status` shows a unified view); without `--db` it stays a pure NDJSON
+   pipe. Writing a `runs` heartbeat is the only store access it is allowed — never `work`/`hosts`.
 3. **Work-queue stages belong to domain B only.** A "stage" is a string in `work.stage`
    (`model.StageLight`, and future `recheck`/`heavy`).
 4. **All store writes go through the single-writer connection** (`SetMaxOpenConns(1)` in

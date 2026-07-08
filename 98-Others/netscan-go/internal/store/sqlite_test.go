@@ -173,6 +173,50 @@ func TestReschedule(t *testing.T) {
 	}
 }
 
+func TestMetaAndHeartbeatTotal(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	if v, _ := s.GetMeta(ctx, "k"); v != "" {
+		t.Fatalf("missing key should be empty, got %q", v)
+	}
+	if err := s.SetMeta(ctx, "k", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.GetMeta(ctx, "k"); v != "v1" {
+		t.Fatalf("got %q, want v1", v)
+	}
+	if err := s.SetMeta(ctx, "k", "v2"); err != nil { // upsert
+		t.Fatal(err)
+	}
+	if v, _ := s.GetMeta(ctx, "k"); v != "v2" {
+		t.Fatalf("got %q, want v2", v)
+	}
+
+	// Heartbeat carries counter + total + note, surfaced by Stats.
+	if err := s.Heartbeat(ctx, RunStat{
+		Tool: "ns-discover", PID: 1, Counter: 42, Total: 1000, Note: "found=3", UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen bool
+	for _, r := range st.Runs {
+		if r.Tool == "ns-discover" {
+			seen = true
+			if r.Counter != 42 || r.Total != 1000 || r.Note != "found=3" {
+				t.Fatalf("run mismatch: %+v", r)
+			}
+		}
+	}
+	if !seen {
+		t.Fatal("ns-discover run not present in stats")
+	}
+}
+
 func TestConcurrentIngestClaimNoLock(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
