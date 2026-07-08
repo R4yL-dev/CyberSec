@@ -38,7 +38,7 @@ EOF
 }
 
 cmd_scan() {
-	local db="$DEFAULT_DB" syn=0 args=() geo_flags=() geo_set=0
+	local db="$DEFAULT_DB" syn=0 args=() geo_flags=() geo_set=0 enrich_flags=()
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			--db)   db="$2"; shift 2 ;;
@@ -46,6 +46,8 @@ cmd_scan() {
 			--syn)  syn=1; shift ;;
 			--geoip|--asn) geo_flags+=("$1" "$2"); geo_set=1; shift 2 ;;
 			--geoip=*|--asn=*) geo_flags+=("$1"); geo_set=1; shift ;;
+			--pipeline) enrich_flags+=("$1" "$2"); shift 2 ;;
+			--pipeline=*) enrich_flags+=("$1"); shift ;;
 			-h|--help) usage ;;
 			*)      args+=("$1"); shift ;;
 		esac
@@ -64,7 +66,7 @@ cmd_scan() {
 
 	# Enrichment runs concurrently with discovery: it drains the queue live and
 	# exits on its own once ingestion signals completion (store meta flag).
-	"$BIN/ns-enrich" --db "$db" --follow &
+	"$BIN/ns-enrich" --db "$db" --follow "${enrich_flags[@]}" &
 	local epid=$!
 
 	echo "netscan: live view -> netscan status --db $db --interval 2s" >&2

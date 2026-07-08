@@ -36,7 +36,7 @@ func main() {
 	drain := flag.Bool("drain", false, "exit once the queue is empty instead of polling")
 	follow := flag.Bool("follow", false, "keep draining until ingestion is done, then exit")
 	pipelinePath := flag.String("pipeline", "", "YAML pipeline config (default: built-in graph)")
-	printPipeline := flag.Bool("print-pipeline", "", "print the default pipeline YAML and exit")
+	printPipeline := flag.Bool("print-pipeline", false, "print the default pipeline YAML and exit")
 	flag.Parse()
 
 	if *printPipeline {
@@ -181,6 +181,14 @@ func process(ctx context.Context, st *store.SQLite, pl pipeline.Pipeline,
 			_ = st.Reschedule(ctx, it.IP, e.To)
 		}
 	}
+}
+
+// loadPipeline returns the built-in pipeline, or one parsed from a YAML file.
+func loadPipeline(path string, timeout time.Duration) (pipeline.Pipeline, error) {
+	if path == "" {
+		return pipeline.Default(timeout), nil
+	}
+	return pipeline.LoadFile(path, timeout)
 }
 
 func writeHeartbeat(ctx context.Context, st *store.SQLite, counter int64) {
