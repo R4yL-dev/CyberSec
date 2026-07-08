@@ -29,6 +29,7 @@ type Pipeline map[string]Stage
 // Default is the built-in graph:
 //
 //	light ──RespondedHTTP──▶ webinfo
+//	      ──HasTLS─────────▶ tls-deep
 //	      ──Always─────────▶ ptr
 func Default(timeout time.Duration) Pipeline {
 	return Pipeline{
@@ -36,10 +37,12 @@ func Default(timeout time.Duration) Pipeline {
 			Enricher: enrich.NewLight(timeout),
 			Next: []Edge{
 				{To: model.StageWebinfo, When: enrich.RespondedHTTP},
+				{To: model.StageTLSDeep, When: enrich.HasTLS},
 				{To: model.StagePTR, When: enrich.Always},
 			},
 		},
 		model.StageWebinfo: {Enricher: enrich.NewWebinfo(timeout)},
+		model.StageTLSDeep: {Enricher: enrich.NewTLSDeep(timeout)},
 		model.StagePTR:     {Enricher: enrich.NewPTR()},
 	}
 }

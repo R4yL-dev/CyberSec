@@ -10,8 +10,8 @@ import (
 func TestDefaultGraph(t *testing.T) {
 	pl := Default(time.Second)
 
-	if len(pl.Stages()) != 3 {
-		t.Fatalf("stages = %v, want 3", pl.Stages())
+	if len(pl.Stages()) != 4 {
+		t.Fatalf("stages = %v, want 4", pl.Stages())
 	}
 
 	light, ok := pl[model.StageLight]
@@ -25,12 +25,16 @@ func TestDefaultGraph(t *testing.T) {
 		}
 		targets[e.To] = true
 	}
-	if !targets[model.StageWebinfo] || !targets[model.StagePTR] {
-		t.Fatalf("light edges = %v, want webinfo + ptr", targets)
+	for _, want := range []string{model.StageWebinfo, model.StageTLSDeep, model.StagePTR} {
+		if !targets[want] {
+			t.Fatalf("light edges = %v, missing %s", targets, want)
+		}
 	}
 
-	if len(pl[model.StageWebinfo].Next) != 0 || len(pl[model.StagePTR].Next) != 0 {
-		t.Fatal("webinfo/ptr should be terminal stages")
+	for _, s := range []string{model.StageWebinfo, model.StageTLSDeep, model.StagePTR} {
+		if len(pl[s].Next) != 0 {
+			t.Fatalf("%s should be a terminal stage", s)
+		}
 	}
 
 	for name, st := range pl {

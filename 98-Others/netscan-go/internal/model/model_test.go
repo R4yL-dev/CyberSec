@@ -21,6 +21,10 @@ func TestMergeNoClobber(t *testing.T) {
 	web.Ports[443].Web = &WebInfo{Technologies: []string{"Cloudflare"}}
 	web.Status["webinfo"] = "ok"
 
+	deep := base()
+	deep.Ports[443].TLSDeep = &TLSDeepInfo{JARM: "abc123"}
+	deep.Status["tls-deep"] = "ok"
+
 	ptr := base()
 	ptr.PTR = []string{"one.one.one.one"}
 	ptr.Status["ptr"] = "ok"
@@ -29,13 +33,16 @@ func TestMergeNoClobber(t *testing.T) {
 		if cur.Ports[443].Web == nil || cur.Ports[443].Web.Technologies[0] != "Cloudflare" {
 			t.Fatal("webinfo lost")
 		}
+		if cur.Ports[443].TLSDeep == nil || cur.Ports[443].TLSDeep.JARM != "abc123" {
+			t.Fatal("tls-deep lost")
+		}
 		if cur.Ports[443].HTTP == nil || cur.Ports[443].TLS == nil {
 			t.Fatal("light HTTP/TLS lost")
 		}
 		if len(cur.PTR) != 1 || cur.PTR[0] != "one.one.one.one" {
 			t.Fatal("ptr lost")
 		}
-		for _, s := range []string{"light", "webinfo", "ptr"} {
+		for _, s := range []string{"light", "webinfo", "tls-deep", "ptr"} {
 			if cur.Status[s] != "ok" {
 				t.Fatalf("status %q lost: %v", s, cur.Status)
 			}
@@ -44,11 +51,13 @@ func TestMergeNoClobber(t *testing.T) {
 
 	forward := base()
 	forward.Merge(web)
+	forward.Merge(deep)
 	forward.Merge(ptr)
 	check(t, forward)
 
 	reverse := base()
 	reverse.Merge(ptr)
+	reverse.Merge(deep)
 	reverse.Merge(web)
 	check(t, reverse)
 }
