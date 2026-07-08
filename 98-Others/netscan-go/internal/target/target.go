@@ -5,11 +5,14 @@
 package target
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"iter"
 	"net/netip"
 	"sort"
+	"sync/atomic"
 )
 
 // reservedCIDRs must never be scanned (RFC 5735/6890): "this network",
@@ -136,10 +139,21 @@ func isReserved(addr netip.Addr) bool {
 // pseudo-random order determined by seed. Reserved/excluded addresses are
 // walked over (permuted then skipped), so no address list is materialized.
 func (s *Space) Randomized(seed uint64) iter.Seq[netip.Addr] {
+	return s.RandomizedFrom(seed, 0, nil)
+}
+
+// RandomizedFrom is Randomized starting at permutation position `start` (for
+// resuming). If pos is non-nil it is updated to the current position as the
+// sequence advances, so a checkpointer can record where the scan is; resuming
+// with the same seed and that position replays the exact remaining sequence.
+func (s *Space) RandomizedFrom(seed, start uint64, pos *uint64) iter.Seq[netip.Addr] {
 	perm := NewPermutation(s.total, seed)
 	return func(yield func(netip.Addr) bool) {
-		for pos := uint64(0); pos < s.total; pos++ {
-			addr := s.AddrAt(perm.Shuffle(pos))
+		for p := start; p < s.total; p++ {
+			if pos != nil {
+				atomic.StoreUint64(pos, p)
+			}
+			addr := s.AddrAt(perm.Shuffle(p))
 			if !s.Allowed(addr) {
 				continue
 			}
@@ -148,6 +162,22 @@ func (s *Space) Randomized(seed uint64) iter.Seq[netip.Addr] {
 			}
 		}
 	}
+}
+
+// Signature is a stable fingerprint of the scan's address space (target
+// prefixes in order, excludes, and the reserved-skipping flag). Resuming is
+// only valid against a checkpoint with the same signature — the prefix order
+// determines the position→address mapping, so it must match exactly.
+func (s *Space) Signature() string {
+	h := sha256.New()
+	for _, p := range s.prefixes {
+		fmt.Fprintf(h, "t:%s;", p.String())
+	}
+	for _, e := range s.excludes {
+		fmt.Fprintf(h, "x:%s;", e.String())
+	}
+	fmt.Fprintf(h, "r:%v", s.skipReserved)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Ordered yields every allowed address in ascending order. Handy for tests and
