@@ -25,6 +25,10 @@ func TestMergeNoClobber(t *testing.T) {
 	deep.Ports[443].TLSDeep = &TLSDeepInfo{JARM: "abc123"}
 	deep.Status["tls-deep"] = "ok"
 
+	crawl := base()
+	crawl.Ports[443].Crawl = &CrawlInfo{Paths: []FoundPath{{Path: "/robots.txt", Status: 200}}}
+	crawl.Status["crawl"] = "ok"
+
 	ptr := base()
 	ptr.PTR = []string{"one.one.one.one"}
 	ptr.Status["ptr"] = "ok"
@@ -35,6 +39,9 @@ func TestMergeNoClobber(t *testing.T) {
 		}
 		if cur.Ports[443].TLSDeep == nil || cur.Ports[443].TLSDeep.JARM != "abc123" {
 			t.Fatal("tls-deep lost")
+		}
+		if cur.Ports[443].Crawl == nil || len(cur.Ports[443].Crawl.Paths) != 1 {
+			t.Fatal("crawl lost")
 		}
 		if cur.Ports[443].HTTP == nil || cur.Ports[443].TLS == nil {
 			t.Fatal("light HTTP/TLS lost")
@@ -52,11 +59,13 @@ func TestMergeNoClobber(t *testing.T) {
 	forward := base()
 	forward.Merge(web)
 	forward.Merge(deep)
+	forward.Merge(crawl)
 	forward.Merge(ptr)
 	check(t, forward)
 
 	reverse := base()
 	reverse.Merge(ptr)
+	reverse.Merge(crawl)
 	reverse.Merge(deep)
 	reverse.Merge(web)
 	check(t, reverse)
