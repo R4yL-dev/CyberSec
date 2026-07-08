@@ -55,6 +55,7 @@ func main() {
 		grace       = flag.Duration("grace", 3*time.Second, "wait for late replies after sending (syn mode)")
 		synSrcPort  = flag.Int("src-port", 0, "SYN source port, 0 = random (syn mode; pin to scope the iptables RST rule)")
 		resume      = flag.Bool("resume", false, "resume from the last checkpoint in --db (requires --db)")
+		progress    = flag.Bool("progress", false, "print a live progress line to stderr (\\r on a TTY, periodic lines otherwise)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
 	)
 	flag.Parse()
@@ -200,11 +201,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "[*] resume  : checkpoint on — Ctrl+C is safe; re-run the same command with --resume")
 	}
 
-	// Progress + checkpoint reporting into the store (read by ns-status). Discover
-	// only writes its own heartbeat/checkpoint here — it never touches the work queue.
+	// Reporting: store heartbeat/checkpoint (with --db) and/or an inline progress
+	// line (with --progress). Discover only writes its own heartbeat/checkpoint —
+	// it never touches the work queue.
 	var progStop func()
-	if st != nil {
-		progStop = startProgress(st, progTotal, &scanned, &found, sig, seed, &pos, space.Total())
+	if st != nil || *progress {
+		progStop = startReporter(st, *progress, isTerminal(os.Stderr),
+			progTotal, &scanned, &found, sig, seed, &pos, space.Total())
 	}
 
 	// Encode discovered hosts to stdout while the prober runs, flushing each one
