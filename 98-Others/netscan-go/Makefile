@@ -1,18 +1,45 @@
-# netscan-go — build and privilege management
+# netscan-go — build, privileges, install
 BIN_DIR  := bin
 BINS     := ns-discover ns-ingest ns-enrich ns-status
 DISCOVER := $(BIN_DIR)/ns-discover
 CAPS     := cap_net_raw,cap_net_admin=eip
+PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build test vet tidy setcap dropcap clean
+.PHONY: all build syn test vet tidy setcap dropcap install uninstall clean help
 
 all: build
 
-## build: compile all binaries into bin/
+## build: compile all binaries into bin/ (no sudo)
 build:
 	@mkdir -p $(BIN_DIR)
 	@for b in $(BINS); do echo "  build $$b"; go build -o $(BIN_DIR)/$$b ./cmd/$$b; done
 	@echo "built into $(BIN_DIR)/"
+	@getcap $(DISCOVER) 2>/dev/null | grep -q cap_net_raw || \
+		echo "  note: SYN mode needs the raw-socket capability — run 'make setcap' (or 'make syn')"
+
+## syn: build, then grant the SYN capability in one step
+syn: build setcap
+
+## setcap: grant raw-socket/pcap capability to ns-discover (sudo). Cleared on each build.
+setcap: $(DISCOVER)
+	sudo setcap $(CAPS) $(DISCOVER)
+	@getcap $(DISCOVER)
+
+## dropcap: remove the capability from ns-discover
+dropcap:
+	-sudo setcap -r $(DISCOVER)
+	@getcap $(DISCOVER) 2>/dev/null || true
+
+## install: put the 'netscan' launcher on PATH (symlink into PREFIX/bin, default ~/.local)
+install:
+	@mkdir -p $(PREFIX)/bin
+	@ln -sf $(abspath netscan) $(PREFIX)/bin/netscan
+	@echo "linked $(PREFIX)/bin/netscan -> $(abspath netscan)"
+	@case ":$$PATH:" in *":$(PREFIX)/bin:"*) ;; *) echo "  note: add $(PREFIX)/bin to your PATH";; esac
+
+## uninstall: remove the launcher symlink
+uninstall:
+	rm -f $(PREFIX)/bin/netscan
 
 ## test: run the test suite
 test:
@@ -26,17 +53,10 @@ vet:
 tidy:
 	go mod tidy
 
-## setcap: grant raw-socket/pcap capability to ns-discover (needs sudo).
-## Rebuilding the binary clears it — re-run after every `make build`.
-setcap: $(DISCOVER)
-	sudo setcap $(CAPS) $(DISCOVER)
-	@getcap $(DISCOVER)
-
-## dropcap: remove the capability from ns-discover
-dropcap:
-	-sudo setcap -r $(DISCOVER)
-	@getcap $(DISCOVER) || true
-
 ## clean: remove built binaries
 clean:
 	rm -rf $(BIN_DIR)
+
+## help: list available targets
+help:
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'
