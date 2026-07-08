@@ -11,9 +11,10 @@ import (
 // Stage names for the domain-B work queue — one per enrichment palier. New
 // paliers add a constant here and an entry in internal/pipeline.
 const (
-	StageLight   = "light"   // cheap HTTP probe + TLS summary (entry palier)
-	StageWebinfo = "webinfo" // richer HTTP fetch + analyzers (tech, headers, favicon)
-	StagePTR     = "ptr"     // reverse DNS
+	StageLight   = "light"    // cheap HTTP probe + TLS summary (entry palier)
+	StageWebinfo = "webinfo"  // richer HTTP fetch + analyzers (tech, headers, favicon)
+	StagePTR     = "ptr"      // reverse DNS
+	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
 )
 
 // WireRecord is one line of NDJSON: what ns-discover emits for a responding
@@ -60,6 +61,9 @@ func (h *HostRecord) Merge(in *HostRecord) {
 		}
 		if pin.Web != nil {
 			pe.Web = pin.Web
+		}
+		if pin.TLSDeep != nil {
+			pe.TLSDeep = pin.TLSDeep
 		}
 	}
 	if len(in.Status) > 0 {
