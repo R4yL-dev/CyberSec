@@ -44,6 +44,7 @@ func main() {
 		printHost(ctx, st, *hostIP)
 		return
 	}
+	prev := map[string]sample{} // per-tool last counter, for rate computation
 	for {
 		s, err := st.Stats(ctx)
 		if err != nil {
@@ -53,7 +54,7 @@ func main() {
 		if *interval > 0 {
 			fmt.Print("\033[2J\033[H") // clear screen for watch mode
 		}
-		printStats(s)
+		printDashboard(s, prev)
 		if *interval <= 0 {
 			return
 		}
@@ -80,29 +81,68 @@ func printHost(ctx context.Context, st *store.SQLite, ipStr string) {
 	fmt.Println(string(out))
 }
 
-func printStats(s store.Stats) {
-	fmt.Printf("== netscan status @ %s ==\n", time.Now().Format("15:04:05"))
-	fmt.Printf("hosts: %d\n", s.Hosts)
+type sample struct {
+	counter int64
+	at      time.Time
+}
 
-	fmt.Printf("work : %s\n", formatCounts(s.WorkByState))
-	if len(s.PendingByStage) > 0 {
-		fmt.Printf("queue: %s (pending by stage)\n", formatCounts(s.PendingByStage))
-	}
-
-	if len(s.Runs) > 0 {
-		fmt.Println("runs :")
-		for _, r := range s.Runs {
-			age := time.Since(r.UpdatedAt).Round(time.Second)
-			fmt.Printf("  %-12s pid=%-6d counter=%-8d %s ago\n", r.Tool, r.PID, r.Counter, age)
+// printDashboard renders a live picture of both domains. Rates are derived from
+// the change in each tool's heartbeat counter since the previous refresh, so
+// they only appear from the second sample onward (interval mode).
+func printDashboard(s store.Stats, prev map[string]sample) {
+	now := time.Now()
+	rate := func(r store.RunStat) (float64, bool) {
+		p, ok := prev[r.Tool]
+		prev[r.Tool] = sample{r.Counter, now}
+		if !ok || !now.After(p.at) {
+			return 0, false
 		}
+		return float64(r.Counter-p.counter) / now.Sub(p.at).Seconds(), true
 	}
+
+	fmt.Printf("== netscan status @ %s ==\n", now.Format("15:04:05"))
+
+	if r, ok := findRun(s.Runs, "ns-discover"); ok {
+		pps, live := rate(*r)
+		pct := ""
+		if r.Total > 0 {
+			pct = fmt.Sprintf(" %.1f%% (%d/%d)", 100*float64(r.Counter)/float64(r.Total), r.Counter, r.Total)
+		}
+		fmt.Printf("discovery :%s%s  %s\n", pct, rateStr(pps, live, "pps"), r.Note)
+	}
+	if r, ok := findRun(s.Runs, "ns-ingest"); ok {
+		v, live := rate(*r)
+		fmt.Printf("ingest    : %d hosts%s\n", r.Counter, rateStr(v, live, "/s"))
+	}
+	fmt.Printf("queue     : %s\n", formatCounts(s.WorkByState))
+	if r, ok := findRun(s.Runs, "ns-enrich"); ok {
+		v, live := rate(*r)
+		fmt.Printf("enrich    : %d done%s  %s\n", r.Counter, rateStr(v, live, "/s"), r.Note)
+	}
+	fmt.Printf("hosts     : %d\n", s.Hosts)
 
 	if len(s.RecentHosts) > 0 {
-		fmt.Println("recent hosts:")
+		fmt.Println("recent    :")
 		for _, h := range s.RecentHosts {
 			fmt.Printf("  %-15s ports=%v\n", h.IP, h.OpenPorts)
 		}
 	}
+}
+
+func findRun(runs []store.RunStat, tool string) (*store.RunStat, bool) {
+	for i := range runs {
+		if runs[i].Tool == tool {
+			return &runs[i], true
+		}
+	}
+	return nil, false
+}
+
+func rateStr(v float64, live bool, unit string) string {
+	if !live {
+		return ""
+	}
+	return fmt.Sprintf("  %.0f %s", v, unit)
 }
 
 func formatCounts(m map[string]int64) string {
