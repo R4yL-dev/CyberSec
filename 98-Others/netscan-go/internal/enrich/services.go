@@ -11,8 +11,10 @@ import (
 // webinfo already fetched — no extra requests. Sources: Server header,
 // X-Powered-By header, and the <meta generator> tag.
 
-// versionRe matches a version like 1.18.0, 2.4.29, 8.2p1, 6.4-beta.
-var versionRe = regexp.MustCompile(`\d+(?:\.\d+)+[\w.\-]*`)
+// versionRe matches a version like 1.18.0, 2.4.29, 8.2p1. The tail keeps word
+// chars (so OpenSSH's "8.2p1" stays intact) but stops at a dash, so build
+// suffixes like MySQL's "5.7.42-log" don't leak into the version.
+var versionRe = regexp.MustCompile(`\d+(?:\.\d+)+\w*`)
 
 // cpeVendorProduct maps a lowercased product name to its CPE "vendor:product".
 // Small and curated; extend as needed. Unknown products get no CPE.
