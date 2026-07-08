@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS hosts (
 	open_ports TEXT NOT NULL,
 	data       TEXT NOT NULL DEFAULT '{}',
 	status     TEXT NOT NULL DEFAULT '{}',
+	ptr        TEXT NOT NULL DEFAULT '',
 	attempts   INTEGER NOT NULL DEFAULT 0,
 	first_seen INTEGER NOT NULL,
 	last_seen  INTEGER NOT NULL
@@ -216,14 +217,14 @@ func (s *SQLite) Claim(ctx context.Context, stage string, n int, lease time.Dura
 
 func (s *SQLite) Host(ctx context.Context, ip netip.Addr) (*model.HostRecord, error) {
 	var (
-		portsJSON, dataJSON, statusJSON string
-		attempts                        int
-		firstSeen, lastSeen             int64
+		portsJSON, dataJSON, statusJSON, ptrJSON string
+		attempts                                 int
+		firstSeen, lastSeen                      int64
 	)
 	err := s.r.QueryRowContext(ctx, `
-		SELECT open_ports, data, status, attempts, first_seen, last_seen
+		SELECT open_ports, data, status, ptr, attempts, first_seen, last_seen
 		FROM hosts WHERE ip=?`, ip.String()).
-		Scan(&portsJSON, &dataJSON, &statusJSON, &attempts, &firstSeen, &lastSeen)
+		Scan(&portsJSON, &dataJSON, &statusJSON, &ptrJSON, &attempts, &firstSeen, &lastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -235,17 +236,18 @@ func (s *SQLite) Host(ctx context.Context, ip netip.Addr) (*model.HostRecord, er
 	if err := json.Unmarshal([]byte(portsJSON), &h.OpenPorts); err != nil {
 		return nil, err
 	}
-	if dataJSON != "" && dataJSON != "{}" {
-		if err := json.Unmarshal([]byte(dataJSON), &h.Ports); err != nil {
-			return nil, err
-		}
-	}
-	if statusJSON != "" && statusJSON != "{}" {
-		if err := json.Unmarshal([]byte(statusJSON), &h.Status); err != nil {
-			return nil, err
-		}
-	}
+	unmarshalJSON(dataJSON, &h.Ports)
+	unmarshalJSON(statusJSON, &h.Status)
+	unmarshalJSON(ptrJSON, &h.PTR)
 	return h, nil
+}
+
+// unmarshalJSON decodes s into v unless s is empty/blank JSON.
+func unmarshalJSON(s string, v any) {
+	if s == "" || s == "{}" || s == "[]" || s == "null" {
+		return
+	}
+	_ = json.Unmarshal([]byte(s), v)
 }
 
 func (s *SQLite) Complete(ctx context.Context, id int64, host *model.HostRecord) error {

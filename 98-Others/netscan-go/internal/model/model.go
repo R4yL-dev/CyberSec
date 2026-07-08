@@ -40,6 +40,45 @@ type HostRecord struct {
 	LastSeen  time.Time         `json:"last_seen"`
 }
 
+// Merge folds another record's enrichment into h, field by field, so the store
+// can combine updates from paliers that ran concurrently on the same host
+// without one clobbering the other. Only non-empty incoming fields win.
+func (h *HostRecord) Merge(in *HostRecord) {
+	if h.Ports == nil {
+		h.Ports = make(map[uint16]*PortInfo, len(in.Ports))
+	}
+	for port, pin := range in.Ports {
+		pe := h.Ports[port]
+		if pe == nil {
+			pe = &PortInfo{Port: port}
+			h.Ports[port] = pe
+		}
+		if pin.HTTP != nil {
+			pe.HTTP = pin.HTTP
+		}
+		if pin.TLS != nil {
+			pe.TLS = pin.TLS
+		}
+		if pin.Web != nil {
+			pe.Web = pin.Web
+		}
+	}
+	if len(in.Status) > 0 {
+		if h.Status == nil {
+			h.Status = make(map[string]string, len(in.Status))
+		}
+		for k, v := range in.Status {
+			h.Status[k] = v
+		}
+	}
+	if len(in.PTR) > 0 {
+		h.PTR = in.PTR
+	}
+	if in.Attempts > h.Attempts {
+		h.Attempts = in.Attempts
+	}
+}
+
 // PortInfo accumulates what each palier learns about a single open port.
 type PortInfo struct {
 	Port uint16    `json:"port"`
