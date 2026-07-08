@@ -52,6 +52,7 @@ func main() {
 		retries     = flag.Int("retries", 1, "SYN retransmissions per probe (syn mode)")
 		grace       = flag.Duration("grace", 3*time.Second, "wait for late replies after sending (syn mode)")
 		synSrcPort  = flag.Int("src-port", 0, "SYN source port, 0 = random (syn mode; pin to scope the iptables RST rule)")
+		resume      = flag.Bool("resume", false, "resume from the last checkpoint in --db (requires --db)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
 	)
 	flag.Parse()
