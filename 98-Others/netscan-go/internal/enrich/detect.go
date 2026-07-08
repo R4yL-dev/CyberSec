@@ -163,9 +163,21 @@ func (d *Detect) tryHTTP(ctx context.Context, ip netip.Addr, port uint16, https 
 	if info == nil {
 		return false
 	}
+	// A plaintext GET to a TLS port draws a telltale "400 ... sent to HTTPS
+	// port" (nginx/cloudflare/apache). It IS https — our TLS handshake just
+	// failed (often transient/NAT). Classify https; webinfo/tls-deep retry TLS.
+	if !https && isHTTPSMisdirect(info) {
+		pi.Protocol = model.ProtoHTTPS
+		return true
+	}
 	pi.Protocol = model.ProtoHTTP
 	pi.HTTP = info
 	return true
+}
+
+// isHTTPSMisdirect recognizes the "plain HTTP request was sent to HTTPS port" 400.
+func isHTTPSMisdirect(info *model.HTTPInfo) bool {
+	return info.Status == 400 && strings.Contains(strings.ToLower(info.Title), "https port")
 }
 
 // httpProbe does one GET (scheme per https) and returns the HTTP summary, or nil

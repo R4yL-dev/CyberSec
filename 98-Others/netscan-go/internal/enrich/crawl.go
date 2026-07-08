@@ -95,11 +95,16 @@ func (c *Crawl) crawl(ctx context.Context, ip netip.Addr, port uint16, https boo
 	client := c.client()
 	info := &model.CrawlInfo{}
 
+	// Baseline: probe a path that shouldn't exist. Servers that answer every path
+	// with the same blanket response (Cloudflare 403, a catch-all 200, a "sent to
+	// HTTPS" 400…) reveal it here; any real probe matching this baseline is noise.
+	baseStatus, baseSize := c.fetch(ctx, client, base+"/nonexistent-a9f3c2e1b7-probe")
+
 	for _, p := range crawlProbes {
 		if ctx.Err() != nil {
 			break
 		}
-		if fp := c.probePath(ctx, client, base, p); fp != nil {
+		if fp := c.probePath(ctx, client, base, p, baseStatus, baseSize); fp != nil {
 			info.Paths = append(info.Paths, *fp)
 		}
 	}
@@ -110,7 +115,22 @@ func (c *Crawl) crawl(ctx context.Context, ip netip.Addr, port uint16, https boo
 	return info
 }
 
-func (c *Crawl) probePath(ctx context.Context, client *http.Client, base string, p probe) *model.FoundPath {
+// fetch GETs a URL and returns its status and body size (status 0 on error).
+func (c *Crawl) fetch(ctx context.Context, client *http.Client, url string) (int, int64) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, 0
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, 0
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, c.MaxBody))
+	return resp.StatusCode, int64(len(body))
+}
+
+func (c *Crawl) probePath(ctx context.Context, client *http.Client, base string, p probe, baseStatus int, baseSize int64) *model.FoundPath {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+p.path, nil)
 	if err != nil {
 		return nil
@@ -124,6 +144,13 @@ func (c *Crawl) probePath(ctx context.Context, client *http.Client, base string,
 		return nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, c.MaxBody))
+	size := int64(len(body))
+
+	// Skip anything matching the blanket baseline (same status + size) — the
+	// server answers every path this way, so it's not a real find.
+	if baseStatus != 0 && resp.StatusCode == baseStatus && size == baseSize {
+		return nil
+	}
 
 	// A signature-guarded probe only counts on a 2xx whose body contains the marker.
 	if p.sig != "" {
@@ -134,7 +161,7 @@ func (c *Crawl) probePath(ctx context.Context, client *http.Client, base string,
 	return &model.FoundPath{
 		Path:      p.path,
 		Status:    resp.StatusCode,
-		Size:      int64(len(body)),
+		Size:      size,
 		Category:  p.category,
 		Signature: p.sig,
 	}
