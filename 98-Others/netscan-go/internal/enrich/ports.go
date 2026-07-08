@@ -20,14 +20,22 @@ var (
 // source.
 func CommonPorts() []uint16 {
 	commonOnce.Do(func() {
+		seen := map[uint16]struct{}{}
 		for _, line := range strings.Split(topPortsFile, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
-			if p, err := strconv.Atoi(line); err == nil && p >= 1 && p <= 65535 {
-				commonPorts = append(commonPorts, uint16(p))
+			p, err := strconv.Atoi(line)
+			if err != nil || p < 1 || p > 65535 {
+				continue
 			}
+			u := uint16(p)
+			if _, dup := seen[u]; dup { // keep first (highest-ranked) occurrence
+				continue
+			}
+			seen[u] = struct{}{}
+			commonPorts = append(commonPorts, u)
 		}
 	})
 	return commonPorts
