@@ -53,6 +53,9 @@ func TestMergeNoClobber(t *testing.T) {
 		if cur.Ports[443].Protocol != ProtoHTTPS {
 			t.Fatalf("protocol lost: %q", cur.Ports[443].Protocol)
 		}
+		if len(cur.OpenPorts) != 2 || cur.OpenPorts[0] != 443 || cur.OpenPorts[1] != 8443 {
+			t.Fatalf("open ports not unioned: %v", cur.OpenPorts)
+		}
 		if len(cur.PTR) != 1 || cur.PTR[0] != "one.one.one.one" {
 			t.Fatal("ptr lost")
 		}
@@ -62,6 +65,9 @@ func TestMergeNoClobber(t *testing.T) {
 			}
 		}
 	}
+
+	// portscan discovers a new port on one of the updates; Merge must union it.
+	web.OpenPorts = []uint16{443, 8443}
 
 	forward := base()
 	forward.Merge(web)

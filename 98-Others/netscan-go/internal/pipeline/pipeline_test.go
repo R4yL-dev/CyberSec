@@ -8,7 +8,7 @@ import (
 )
 
 func TestDefaultGraph(t *testing.T) {
-	pl := Default(time.Second)
+	pl := Default(Options{Timeout: time.Second})
 
 	if len(pl.Stages()) != 5 {
 		t.Fatalf("stages = %v, want 5", pl.Stages())
@@ -54,7 +54,7 @@ stages:
   webinfo: {}
   crawl: {}
 `
-	pl, err := Load([]byte(yaml), time.Second)
+	pl, err := Load([]byte(yaml), Options{Timeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ stages:
 }
 
 func TestLoadEmptyWhenIsAlways(t *testing.T) {
-	pl, err := Load([]byte("stages:\n  detect:\n    next:\n      - {to: ptr}\n  ptr: {}\n"), time.Second)
+	pl, err := Load([]byte("stages:\n  detect:\n    next:\n      - {to: ptr}\n  ptr: {}\n"), Options{Timeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestLoadInvalid(t *testing.T) {
 		"no stages":         "stages: {}\n",
 	}
 	for name, yaml := range cases {
-		if _, err := Load([]byte(yaml), time.Second); err == nil {
+		if _, err := Load([]byte(yaml), Options{Timeout: time.Second}); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
 		}
 	}

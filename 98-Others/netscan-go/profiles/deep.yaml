@@ -1,0 +1,24 @@
+# Deep scan profile: the default enrichment graph plus a per-host portscan.
+#
+#   netscan scan --targets 1.1.1.0/24 --db scan.db --pipeline profiles/deep.yaml --ports-deep all
+#
+# portscan sweeps the host's ports (breadth from --ports-deep: empty = common
+# set, "all" = 1-65535, or a spec like 1-1024,3306). Newly-found ports are
+# unioned into the host and re-classified by re-entering detect (the
+# portscan -> detect edge); the needs_portscan guard makes portscan run once.
+# This is the most aggressive palier — many connects per host.
+stages:
+  detect:
+    next:
+      - {to: webinfo,  when: is_web}
+      - {to: crawl,    when: is_web}
+      - {to: tls-deep, when: has_tls}
+      - {to: ptr,      when: always}
+      - {to: portscan, when: needs_portscan}
+  portscan:
+    next:
+      - {to: detect, when: always}   # re-classify/enrich any newly-found ports
+  webinfo: {}
+  crawl: {}
+  tls-deep: {}
+  ptr: {}
