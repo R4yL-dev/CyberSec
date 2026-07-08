@@ -292,6 +292,11 @@ Lower-priority and **not** yet agreed in detail — capture only, do not treat a
   interface.
 - **Richer HTTP fidelity** (take `Server`/`title` from the first hop rather than the final
   response; configurable TLS ports instead of the hardcoded `{443}`).
+- **Launcher-owned live display** — make `netscan scan` suppress the sub-binaries' stderr and
+  render its own single unified progress line (read from the store), instead of pointing users at
+  `ns-status --interval` in another pane. This is the clean way to get inline progress *inside the
+  launcher*, where `ns-discover`'s and `ns-enrich`'s stderr would otherwise collide with a live
+  `\r` line. Complements the `--progress` opt-in on `ns-discover` (for direct/unpiped use).
 - **Adaptive rate governor (`--rate auto`)** — a feedback loop that periodically health-checks its
   own connectivity (a fresh TCP connect to a known host, and/or a DNS lookup) and adjusts the rate
   AIMD-style: ramp up while healthy, cut hard (×0.5) when the probe fails/slows. `rate.Limiter`
