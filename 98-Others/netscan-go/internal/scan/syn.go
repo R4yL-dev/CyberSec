@@ -88,11 +88,10 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 		return fmt.Errorf("bpf filter: %w", err)
 	}
 
-	var (
-		mu      sync.Mutex
-		openMap = map[netip.Addr]map[uint16]struct{}{}
-		stop    atomic.Bool
-	)
+	// seen deduplicates (host, port) so a retransmitted SYN-ACK is emitted once.
+	// The receiver is the sole accessor, so no lock is needed.
+	seen := map[netip.Addr]map[uint16]struct{}{}
+	var stop atomic.Bool
 	recvDone := make(chan struct{})
 	go func() {
 		defer close(recvDone)
@@ -120,15 +119,24 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 			if !ok {
 				continue
 			}
-			if tcp.Ack != p.cookie(addr, uint16(tcp.SrcPort))+1 {
+			port := uint16(tcp.SrcPort)
+			if tcp.Ack != p.cookie(addr, port)+1 {
 				continue // not a reply to one of our SYNs
 			}
-			mu.Lock()
-			if openMap[addr] == nil {
-				openMap[addr] = map[uint16]struct{}{}
+			if seen[addr] == nil {
+				seen[addr] = map[uint16]struct{}{}
 			}
-			openMap[addr][uint16(tcp.SrcPort)] = struct{}{}
-			mu.Unlock()
+			if _, dup := seen[addr][port]; dup {
+				continue
+			}
+			seen[addr][port] = struct{}{}
+			// Stream the host as soon as it answers (one record per open port;
+			// ns-ingest unions ports). This lets enrichment overlap discovery.
+			select {
+			case out <- model.WireRecord{IP: addr, OpenPorts: []uint16{port}, DiscoveredAt: time.Now().UTC()}:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
@@ -154,21 +162,6 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 	stop.Store(true)
 	<-recvDone
 	handle.Close()
-
-	mu.Lock()
-	defer mu.Unlock()
-	for addr, ports := range openMap {
-		list := make([]uint16, 0, len(ports))
-		for pt := range ports {
-			list = append(list, pt)
-		}
-		sort.Slice(list, func(i, j int) bool { return list[i] < list[j] })
-		select {
-		case out <- model.WireRecord{IP: addr, OpenPorts: list, DiscoveredAt: time.Now().UTC()}:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	return ctx.Err()
 }
 
