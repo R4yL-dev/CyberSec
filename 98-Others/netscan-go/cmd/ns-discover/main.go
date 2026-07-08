@@ -121,8 +121,7 @@ func main() {
 		if !ok {
 			fatal("--resume: no checkpoint to resume in %s (already finished, or none written yet)", *dbPath)
 		}
-		seed, startPos = ck.Seed, ck.Pos
-		fmt.Fprintf(os.Stderr, "[*] resume  : from position %d / %d (seed=%d)\n", startPos, space.Total(), seed)
+		seed, startPos = ck.Seed, ck.Pos // rewound below, once effWorkers is known
 	}
 
 	// Connect mode: lift the FD limit and size the worker pool so it can actually
@@ -136,6 +135,14 @@ func main() {
 					"(rate=%.0f); raise ulimit -n or use --mode syn\n", achievable, *ratePPS)
 			}
 		}
+	}
+
+	// The checkpoint records the generator position, which reads ahead of what
+	// was actually probed (by the connect feed buffer + in-flight workers). Rewind
+	// past that window so resume re-covers those addresses instead of skipping them.
+	if *resume {
+		startPos = rewindPos(startPos, *mode, effWorkers)
+		fmt.Fprintf(os.Stderr, "[*] resume  : from position %d / %d (seed=%d)\n", startPos, space.Total(), seed)
 	}
 
 	var limiter *rate.Limiter
@@ -317,6 +324,24 @@ func writeCheckpoint(st *store.SQLite, sig string, seed uint64, pos *uint64, tot
 
 func clearCheckpoint(st *store.SQLite) error {
 	return st.SetMeta(context.Background(), checkpointKey, "")
+}
+
+// rewindPos backs a resume position up past the prober's in-flight window so
+// resume overlaps already-probed addresses rather than skipping a gap. The SYN
+// sender consumes the sequence in order with no read-ahead (no rewind needed);
+// connect reads ahead by its feed buffer (workers*2) plus in-flight workers.
+func rewindPos(pos uint64, mode string, workers int) uint64 {
+	if mode == "syn" {
+		return pos
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	margin := uint64(workers)*4 + (1 << 14) // feed buffer + workers + slack
+	if pos > margin {
+		return pos - margin
+	}
+	return 0
 }
 
 // startProgress writes a discovery heartbeat (scanned/total, found) and a resume
