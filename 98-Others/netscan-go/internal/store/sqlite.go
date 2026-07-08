@@ -32,7 +32,11 @@ func Open(path string) (*SQLite, error) {
 		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)"
 
-	w, err := sql.Open("sqlite", dsn)
+	// The writer uses BEGIN IMMEDIATE so every transaction takes the write lock
+	// up front. Without this, a read-then-write transaction (e.g. Ingest's
+	// SELECT + INSERT) can fail with SQLITE_BUSY when another process writes in
+	// between — busy_timeout does not retry that upgrade deadlock.
+	w, err := sql.Open("sqlite", dsn+"&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
