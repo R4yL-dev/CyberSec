@@ -89,8 +89,18 @@ fingerprint via `github.com/hdm/jarm-go`) gated after `light`. Concurrent palier
 **deliberately not a palier** — it's a local IP lookup annotated at ingest (`internal/geoip`,
 `ns-ingest --geoip/--asn` default-on from `data/`, `make geoip` downloads DB-IP lite). Design note:
 IP-only attributes annotate at ingest, not via the queue. **`crawl`** (well-known + sensitive
-paths, signature-guarded, + OPTIONS methods) is done, gated on an HTTP response. **Remaining:**
-`recheck` and config-file-driven wiring — all on this pattern.
+paths, signature-guarded, + OPTIONS methods) is done, gated on an HTTP response. **Service/version
+extraction** is done as a webinfo analyzer: normalized `Service{product,version,cpe,source}` on
+`PortInfo.Services`, parsed from Server/X-Powered-By/generator with best-effort CPE — the CVE
+foundation. **Remaining:** `recheck` and config-file-driven wiring — all on this pattern.
+
+## CVE chain (the end goal — sort/filter hosts by CVE)
+
+**Status:** foundation done (service/version extraction → `PortInfo.Services` with CPEs). Next:
+- **Non-web banner grabbing** (SSH/FTP/SMTP/DB…): expand `ns-discover` ports + a `banner` palier;
+  richest version source; writes into the same `PortInfo.Services`.
+- **CVE matching**: ingest NVD, match `Service.CPE` + version ranges → CVE list per host; then a
+  query/filter surface (`ns-status`/`ns-query`) to sort hosts by CVE. Big separate step.
 
 **What.** Additional, heavier enrichment stages beyond `light` (e.g. full-body fetch and
 crawling, deeper certificate/chain analysis, tech fingerprinting), each gated by a **selector**

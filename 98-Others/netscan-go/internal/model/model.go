@@ -101,10 +101,10 @@ func (h *HostRecord) Merge(in *HostRecord) {
 
 // PortInfo accumulates what each palier learns about a single open port.
 type PortInfo struct {
-	Port    uint16       `json:"port"`
-	HTTP    *HTTPInfo    `json:"http,omitempty"`
-	TLS     *TLSInfo     `json:"tls,omitempty"`
-	Web     *WebInfo     `json:"web,omitempty"`
+	Port     uint16       `json:"port"`
+	HTTP     *HTTPInfo    `json:"http,omitempty"`
+	TLS      *TLSInfo     `json:"tls,omitempty"`
+	Web      *WebInfo     `json:"web,omitempty"`
 	TLSDeep  *TLSDeepInfo `json:"tls_deep,omitempty"`
 	Crawl    *CrawlInfo   `json:"crawl,omitempty"`
 	Services []Service    `json:"services,omitempty"`

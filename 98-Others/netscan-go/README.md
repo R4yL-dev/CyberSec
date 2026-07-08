@@ -342,7 +342,10 @@ light ──RespondedHTTP──▶ webinfo
   status, `Server`, redirect chain, `<title>`; plus a TLS cert summary on 443 (version, CN, SANs,
   issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust.
 - **`webinfo`** (gated on an HTTP response): one richer fetch → all headers, cookies, detected
-  technologies, security headers, and a Shodan-style favicon hash.
+  technologies, security headers, a Shodan-style favicon hash, and **normalized services** —
+  product+version parsed from `Server` / `X-Powered-By` / `<meta generator>`, with a **CPE**
+  (`cpe:2.3:a:vendor:product:version`) when the vendor is known. This is the CVE-matching
+  foundation (`PortInfo.Services`); version data is best-effort (headers are often stripped).
 - **`tls-deep`** (gated on TLS): supported TLS versions + negotiated cipher per version, full cert
   chain, weak-crypto warnings, and a **JARM** active fingerprint (~15 handshakes, hence gated).
 - **`crawl`** (gated on an HTTP response): probes a curated set of well-known paths
