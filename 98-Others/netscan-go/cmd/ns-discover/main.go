@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"netscan/internal/enrich"
 	"netscan/internal/fmtx"
 	"netscan/internal/model"
 	"netscan/internal/scan"
@@ -45,6 +46,7 @@ func main() {
 		excludeFile = flag.String("exclude-file", "", "file of CIDRs to exclude (one per line)")
 		noReserved  = flag.Bool("no-skip-reserved", false, "do NOT skip reserved/private ranges")
 		portsFlag   = flag.String("ports", "80,443", "comma-separated ports")
+		topPorts    = flag.Int("top-ports", 0, "scan the N most common ports instead of --ports (0 = use --ports)")
 		mode        = flag.String("mode", "connect", "discovery mode: connect|syn")
 		ratePPS     = flag.Float64("rate", 1000, "max probes per second (0 = unlimited)")
 		workers     = flag.Int("workers", -1, "concurrent workers, connect mode (-1 = auto from rate x timeout, bounded by FDs)")
@@ -76,6 +78,13 @@ func main() {
 	ports, err := parsePorts(*portsFlag)
 	if err != nil {
 		fatal("%v", err)
+	}
+	if *topPorts > 0 {
+		common := enrich.CommonPorts()
+		if *topPorts < len(common) {
+			common = common[:*topPorts]
+		}
+		ports = common
 	}
 
 	space, err := target.NewSpace(targets, excludes, !*noReserved)
