@@ -75,16 +75,20 @@ func main() {
 		excludes = append(excludes, lines...)
 	}
 
-	ports, err := parsePorts(*portsFlag)
-	if err != nil {
-		fatal("%v", err)
-	}
-	if *topPorts > 0 {
-		common := enrich.CommonPorts()
-		if *topPorts < len(common) {
-			common = common[:*topPorts]
+	// --ports (explicit) wins; otherwise scan the N most common ports.
+	var ports []uint16
+	if *portsFlag != "" {
+		ports, err = parsePorts(*portsFlag)
+		if err != nil {
+			fatal("%v", err)
 		}
-		ports = common
+	} else {
+		common := enrich.CommonPorts()
+		n := *topPorts
+		if n <= 0 || n > len(common) {
+			n = len(common)
+		}
+		ports = common[:n]
 	}
 
 	space, err := target.NewSpace(targets, excludes, !*noReserved)
