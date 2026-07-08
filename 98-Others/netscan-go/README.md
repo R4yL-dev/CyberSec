@@ -194,8 +194,10 @@ make build
 ./netscan status --db scan.db --host 1.1.1.1     # full record for one host
 ```
 
-`scan` runs the whole pipeline in one shot: discovery → ingest → light enrichment (`--drain`,
-i.e. exit when the queue empties).
+`scan` runs the pipeline with discovery and enrichment **overlapped**: it starts an
+`ns-enrich --follow` worker that drains the queue live while discovery is still running, and
+exits once ingestion is done and the queue is empty. Watch progress with a live dashboard in
+another pane: `netscan status --db scan.db --interval 2s`.
 
 **SYN workflow (privileged, faster):**
 
@@ -232,17 +234,23 @@ the scan in a **scoped, auto-removed iptables guard** (see [How it works](#the-k
 | `--ports`            | `80,443`   | Comma-separated ports.                                      |
 | `--mode`             | `connect`  | `connect` or `syn`.                                        |
 | `--rate`             | `1000`     | Max probes per second (`0` = unlimited).                   |
-| `--workers`          | `100`      | Concurrent workers (connect mode).                         |
+| `--workers`          | `-1` (auto)| Connect concurrency. Auto = `rate × timeout`, bounded by the FD limit and 4096; set `>0` to override. Reaching high rates needs this many concurrent dials — SYN mode avoids the ceiling. |
 | `--timeout`          | `1.5s`     | Per-connection timeout (connect mode).                     |
 | `--seed`             | `-1`       | Permutation seed for reproducible order (`-1` = random).   |
-| `--retries`          | `1`        | SYN retransmissions per probe (syn mode).                  |
+| `--retries`          | `1`        | SYN passes over the target set — retransmits are spaced across the whole scan, not back-to-back (syn mode). |
 | `--grace`            | `3s`       | Wait for late replies after sending (syn mode).            |
 | `--src-port`         | `0`        | SYN source port (`0` = random; pin to scope the iptables rule). |
+| `--db`               | —          | Optional SQLite DB to report scan progress into, for `ns-status` (never touches the work queue). |
 | `--yes`              | `false`    | Confirm scans larger than 65536 addresses.                 |
 
+`ns-discover` also raises its soft open-file limit to the hard limit on startup so connect mode
+can use enough workers; if the rate still can't be met it prints a one-line warning.
+
 **`ns-enrich` flags:** `--db`, `--stage light`, `--workers 50`, `--timeout 10s`,
-`--max-attempts 5`, `--lease 2m`, `--backoff 5s`, `--drain` (exit when the queue is empty).
-**`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; otherwise refresh), `--host IP`.
+`--max-attempts 5`, `--lease 2m`, `--backoff 5s`, `--drain` (exit on first empty queue),
+`--follow` (drain until ingestion is done, then exit — used by `netscan scan` for overlap).
+**`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
+rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.
 
 ## How it works
