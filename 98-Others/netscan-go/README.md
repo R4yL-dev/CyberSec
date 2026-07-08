@@ -333,6 +333,7 @@ Built-in graph:
 
 ```
 light ──RespondedHTTP──▶ webinfo
+      ──RespondedHTTP──▶ crawl
       ──HasTLS─────────▶ tls-deep
       ──Always─────────▶ ptr
 ```
@@ -344,6 +345,10 @@ light ──RespondedHTTP──▶ webinfo
   technologies, security headers, and a Shodan-style favicon hash.
 - **`tls-deep`** (gated on TLS): supported TLS versions + negotiated cipher per version, full cert
   chain, weak-crypto warnings, and a **JARM** active fingerprint (~15 handshakes, hence gated).
+- **`crawl`** (gated on an HTTP response): probes a curated set of well-known paths
+  (`robots.txt`, `sitemap.xml`, `.well-known/…`) and sensitive exposures (`/.git/HEAD`, `/.env`,
+  `/server-status`, backups — signature-guarded against soft-404s), plus the `OPTIONS` methods.
+  The most request-heavy palier; only for authorized targets.
 - **`ptr`** (always): reverse DNS.
 
 **GeoIP / ASN** is not a palier — it's a purely local lookup on the IP, done at **ingest** and
