@@ -125,7 +125,7 @@ func Load(data []byte, opts Options) (Pipeline, error) {
 		if !ok {
 			return nil, fmt.Errorf("pipeline: unknown stage/enricher %q", name)
 		}
-		st := Stage{Enricher: ctor(timeout)}
+		st := Stage{Enricher: ctor(opts)}
 		for _, e := range sc.Next {
 			when := e.When
 			if when == "" {

@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"netscan/internal/enrich"
 	"netscan/internal/pipeline"
 	"netscan/internal/store"
 )
@@ -37,6 +39,7 @@ func main() {
 	follow := flag.Bool("follow", false, "keep draining until ingestion is done, then exit")
 	pipelinePath := flag.String("pipeline", "", "YAML pipeline config (default: built-in graph)")
 	printPipeline := flag.Bool("print-pipeline", false, "print the default pipeline YAML and exit")
+	portsDeep := flag.String("ports-deep", "", "portscan breadth: 'all', a spec like 1-1024,3306, or empty = common set")
 	flag.Parse()
 
 	if *printPipeline {
@@ -47,7 +50,12 @@ func main() {
 		fatal("--db is required")
 	}
 
-	pl, err := loadPipeline(*pipelinePath, *timeout)
+	deepPorts, err := parsePortSpec(*portsDeep)
+	if err != nil {
+		fatal("--ports-deep: %v", err)
+	}
+	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts}
+	pl, err := loadPipeline(*pipelinePath, opts)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -184,11 +192,60 @@ func process(ctx context.Context, st *store.SQLite, pl pipeline.Pipeline,
 }
 
 // loadPipeline returns the built-in pipeline, or one parsed from a YAML file.
-func loadPipeline(path string, timeout time.Duration) (pipeline.Pipeline, error) {
+func loadPipeline(path string, opts pipeline.Options) (pipeline.Pipeline, error) {
 	if path == "" {
-		return pipeline.Default(timeout), nil
+		return pipeline.Default(opts), nil
 	}
-	return pipeline.LoadFile(path, timeout)
+	return pipeline.LoadFile(path, opts)
+}
+
+// parsePortSpec turns the --ports-deep value into a port list: "" → the common
+// set, "all" → 1-65535, otherwise a comma list of ports and ranges (e.g.
+// "1-1024,3306,8000-8100").
+func parsePortSpec(spec string) ([]uint16, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return enrich.CommonPorts(), nil
+	}
+	if spec == "all" {
+		out := make([]uint16, 0, 65535)
+		for p := 1; p <= 65535; p++ {
+			out = append(out, uint16(p))
+		}
+		return out, nil
+	}
+	seen := map[uint16]struct{}{}
+	var out []uint16
+	add := func(p int) {
+		u := uint16(p)
+		if _, ok := seen[u]; !ok {
+			seen[u] = struct{}{}
+			out = append(out, u)
+		}
+	}
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if lo, hi, ok := strings.Cut(part, "-"); ok {
+			a, err1 := strconv.Atoi(strings.TrimSpace(lo))
+			b, err2 := strconv.Atoi(strings.TrimSpace(hi))
+			if err1 != nil || err2 != nil || a < 1 || b > 65535 || a > b {
+				return nil, fmt.Errorf("invalid range %q", part)
+			}
+			for p := a; p <= b; p++ {
+				add(p)
+			}
+			continue
+		}
+		p, err := strconv.Atoi(part)
+		if err != nil || p < 1 || p > 65535 {
+			return nil, fmt.Errorf("invalid port %q", part)
+		}
+		add(p)
+	}
+	return out, nil
 }
 
 func writeHeartbeat(ctx context.Context, st *store.SQLite, counter int64) {
