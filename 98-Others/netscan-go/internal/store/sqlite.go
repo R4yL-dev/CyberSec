@@ -121,8 +121,8 @@ func unionPorts(a, b []uint16) []uint16 {
 	return out
 }
 
-func nowMS() int64          { return time.Now().UnixMilli() }
-func ms(t time.Time) int64  { return t.UnixMilli() }
+func nowMS() int64             { return time.Now().UnixMilli() }
+func ms(t time.Time) int64     { return t.UnixMilli() }
 func fromMS(v int64) time.Time { return time.UnixMilli(v).UTC() }
 
 func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string) error {

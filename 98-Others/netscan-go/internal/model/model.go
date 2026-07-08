@@ -32,7 +32,7 @@ type HostRecord struct {
 	OpenPorts []uint16             `json:"open_ports"`
 	Ports     map[uint16]*PortInfo `json:"ports,omitempty"`
 
-	PTR       []string          `json:"ptr,omitempty"` // reverse DNS names
+	PTR       []string          `json:"ptr,omitempty"`    // reverse DNS names
 	Status    map[string]string `json:"status,omitempty"` // per-stage status
 	Attempts  int               `json:"attempts"`
 	FirstSeen time.Time         `json:"first_seen"`
