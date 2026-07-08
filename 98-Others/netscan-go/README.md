@@ -131,7 +131,7 @@ Internal packages (`internal/`):
 | `scan`    | `Prober` interface with `ConnectProber` and `SYNProber`.                                  |
 | `stream`  | NDJSON encode/decode over stdout/stdin.                                                   |
 | `store`   | `Store` interface + SQLite implementation (host state + work queue + re-entrance).        |
-| `enrich`  | `Enricher` interface + `light` palier (HTTP + TLS), ported from `netscan.py`.             |
+| `enrich`  | `Enricher` interface + paliers: `detect` (protocol triage), `webinfo`, `crawl`, `tls-deep`, `ptr`. |
 
 ## Install & build
 
@@ -225,7 +225,7 @@ guard with `netscan iptables-clean`.
 # discovery to a file, enrichment separately (replayable without re-scanning)
 ./bin/ns-discover --targets 1.1.1.0/24 > open.ndjson
 ./bin/ns-ingest --db scan.db < open.ndjson
-./bin/ns-enrich --db scan.db --stage light --workers 50      # runs until interrupted, draining as ingest adds
+./bin/ns-enrich --db scan.db --workers 50                    # drains the whole pipeline until interrupted
 
 # or a live pipeline plus a long-running worker in another shell
 ./bin/ns-discover --targets 1.1.1.0/24 | ./bin/ns-ingest --db scan.db
@@ -393,6 +393,7 @@ New paliers = a new `Enricher` + a stage/edge in `pipeline.Default`; new analyze
   "ports": {
     "443": {
       "port": 443,
+      "protocol": "https",
       "http": {
         "url": "https://1.1.1.1:443/",
         "status": 200,
@@ -410,7 +411,7 @@ New paliers = a new `Enricher` + a stage/edge in `pipeline.Default`; new analyze
       }
     }
   },
-  "status": {"light": "ok"},
+  "status": {"detect": "ok", "webinfo": "ok", "tls-deep": "ok", "ptr": "ok"},
   "attempts": 1,
   "first_seen": "2026-07-07T21:43:12.756Z",
   "last_seen": "2026-07-07T21:43:13.021Z"
@@ -480,5 +481,5 @@ netscan-go/
     ├── scan/                Prober: connect + SYN backends
     ├── stream/              NDJSON encode/decode
     ├── store/               Store interface + SQLite (state + work queue)
-    └── enrich/              Enricher interface + light palier (HTTP/TLS)
+    └── enrich/              Enricher interface + paliers (detect, webinfo, crawl, tls-deep, ptr)
 ```
