@@ -43,3 +43,53 @@ func TestDefaultGraph(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadWebOnlyProfile(t *testing.T) {
+	yaml := `
+stages:
+  detect:
+    next:
+      - {to: webinfo, when: is_web}
+      - {to: crawl,   when: is_web}
+  webinfo: {}
+  crawl: {}
+`
+	pl, err := Load([]byte(yaml), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pl.Stages()) != 3 {
+		t.Fatalf("stages = %v, want detect/webinfo/crawl", pl.Stages())
+	}
+	if _, ok := pl[model.StageTLSDeep]; ok {
+		t.Fatal("web-only profile should not include tls-deep")
+	}
+	if len(pl[model.StageDetect].Next) != 2 {
+		t.Fatalf("detect should have 2 edges, got %d", len(pl[model.StageDetect].Next))
+	}
+}
+
+func TestLoadEmptyWhenIsAlways(t *testing.T) {
+	pl, err := Load([]byte("stages:\n  detect:\n    next:\n      - {to: ptr}\n  ptr: {}\n"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := pl[model.StageDetect].Next[0]; e.When == nil || !e.When(nil) {
+		t.Fatal("empty when should resolve to always")
+	}
+}
+
+func TestLoadInvalid(t *testing.T) {
+	cases := map[string]string{
+		"missing detect":    "stages:\n  ptr: {}\n",
+		"unknown enricher":  "stages:\n  detect: {}\n  bogus: {}\n",
+		"unknown selector":  "stages:\n  detect:\n    next:\n      - {to: ptr, when: nope}\n  ptr: {}\n",
+		"edge to undefined": "stages:\n  detect:\n    next:\n      - {to: ghost, when: always}\n",
+		"no stages":         "stages: {}\n",
+	}
+	for name, yaml := range cases {
+		if _, err := Load([]byte(yaml), time.Second); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}

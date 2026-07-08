@@ -264,9 +264,31 @@ completion. Works in both `connect` and `syn` modes; `netscan scan --resume ...`
 can use enough workers; if the rate still can't be met it prints a one-line warning.
 
 **`ns-enrich` flags:** `--db`, `--stage` (comma-separated stages to drain; default: the whole
-pipeline), `--workers 50`, `--timeout 10s`, `--max-attempts 5`, `--lease 2m`, `--backoff 5s`,
-`--drain` (exit on first empty queue), `--follow` (drain until ingestion is done, then exit —
-used by `netscan scan` for overlap).
+pipeline), `--pipeline <file.yaml>` (custom pipeline; default: built-in graph), `--print-pipeline`
+(dump the default YAML as a template), `--workers 50`, `--timeout 10s`, `--max-attempts 5`,
+`--lease 2m`, `--backoff 5s`, `--drain` (exit on first empty queue), `--follow` (drain until
+ingestion is done, then exit — used by `netscan scan` for overlap).
+
+**Scan profiles (custom pipelines).** The enrichment graph is described in YAML and resolved
+against name registries (enrichers + selectors); the built-in default is embedded. Build a profile
+by editing the template:
+
+```bash
+ns-enrich --print-pipeline > web-only.yaml   # then trim it to the stages you want
+netscan scan --targets 1.1.1.0/24 --db scan.db --pipeline web-only.yaml
+```
+
+```yaml
+# web-only.yaml — only fingerprint web ports, skip tls-deep/crawl/ptr
+stages:
+  detect:                       # entry is always "detect"
+    next:
+      - {to: webinfo, when: is_web}
+  webinfo: {}
+```
+
+Selectors are named (`always`, `is_web`, `has_tls`); enrichers/stages are `detect`, `webinfo`,
+`crawl`, `tls-deep`, `ptr`. `Load` validates the graph (entry present, known names, edges resolve).
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
 rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.

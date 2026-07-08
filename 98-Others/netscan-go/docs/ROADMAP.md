@@ -103,7 +103,12 @@ handshake (**any port**, definitive), then plaintext HTTP, filling `PortInfo.Pro
 probe order; **HTTPS on 8443 and SSH on 2222 are now detected**. Selectors gate on protocol
 (`IsWeb`, `HasTLS` any-port); the old `banner` palier was folded into `detect`; `light` removed.
 
-**Remaining:** `recheck` and config-file-driven wiring — all on this pattern.
+**Config-driven wiring** ✅ done — the graph is described in YAML (`internal/pipeline/default.yaml`,
+embedded as the built-in default), resolved against name registries (enrichers + **named
+selectors** `always`/`is_web`/`has_tls`; no expression DSL yet). `ns-enrich --pipeline <file>` /
+`--print-pipeline`, `netscan scan --pipeline` forward it; entry stays `detect`; `Load` validates.
+
+**Remaining:** `recheck`, and a selector **expression DSL** if named selectors ever fall short.
 
 ## CVE chain (the end goal — sort/filter hosts by CVE)
 
