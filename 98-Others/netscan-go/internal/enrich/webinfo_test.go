@@ -18,6 +18,7 @@ func TestLightThenWebinfo(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Server", "nginx/1.25")
+		w.Header().Set("X-Powered-By", "PHP/8.2")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Strict-Transport-Security", "max-age=63072000")
 		http.SetCookie(w, &http.Cookie{Name: "PHPSESSID", Value: "abc"})
@@ -76,5 +77,18 @@ func TestLightThenWebinfo(t *testing.T) {
 	}
 	if len(web.Headers) == 0 || len(web.Cookies) == 0 {
 		t.Fatalf("headers=%d cookies=%d", len(web.Headers), len(web.Cookies))
+	}
+
+	// Version extraction: Server "nginx/1.25" -> nginx 1.25 (+CPE), X-Powered-By "PHP/8.2" -> php.
+	svcs := host.Ports[ap.Port()].Services
+	byProduct := map[string]model.Service{}
+	for _, s := range svcs {
+		byProduct[s.Product] = s
+	}
+	if s := byProduct["nginx"]; s.Version != "1.25" || s.CPE != "cpe:2.3:a:nginx:nginx:1.25" {
+		t.Fatalf("nginx service = %+v", s)
+	}
+	if s := byProduct["php"]; s.Version != "8.2" {
+		t.Fatalf("php service = %+v", s)
 	}
 }

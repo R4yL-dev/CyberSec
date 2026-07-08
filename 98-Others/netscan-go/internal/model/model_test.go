@@ -27,6 +27,7 @@ func TestMergeNoClobber(t *testing.T) {
 
 	crawl := base()
 	crawl.Ports[443].Crawl = &CrawlInfo{Paths: []FoundPath{{Path: "/robots.txt", Status: 200}}}
+	crawl.Ports[443].Services = []Service{{Product: "nginx", Version: "1.25", CPE: "cpe:2.3:a:nginx:nginx:1.25"}}
 	crawl.Status["crawl"] = "ok"
 
 	ptr := base()
@@ -42,6 +43,9 @@ func TestMergeNoClobber(t *testing.T) {
 		}
 		if cur.Ports[443].Crawl == nil || len(cur.Ports[443].Crawl.Paths) != 1 {
 			t.Fatal("crawl lost")
+		}
+		if len(cur.Ports[443].Services) != 1 || cur.Ports[443].Services[0].Product != "nginx" {
+			t.Fatal("services lost")
 		}
 		if cur.Ports[443].HTTP == nil || cur.Ports[443].TLS == nil {
 			t.Fatal("light HTTP/TLS lost")
