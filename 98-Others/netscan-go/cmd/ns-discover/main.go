@@ -14,9 +14,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"iter"
 	"math"
-	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -109,20 +107,28 @@ func main() {
 		limiter = rate.NewLimiter(rate.Limit(*ratePPS), burst)
 	}
 
+	// scanned counts addresses actually probed (not merely queued); progTotal is
+	// its denominator (SYN sends `retries` passes, so its total is multiplied).
+	var scanned, found int64
+	progTotal := space.Total()
+
 	var prober scan.Prober
 	switch *mode {
 	case "connect":
 		prober = &scan.ConnectProber{
-			Ports:   ports,
-			Workers: effWorkers,
-			Timeout: *timeout,
-			Limiter: limiter,
+			Ports:    ports,
+			Workers:  effWorkers,
+			Timeout:  *timeout,
+			Limiter:  limiter,
+			Progress: &scanned,
 		}
 	case "syn":
 		if *synSrcPort < 0 || *synSrcPort > 65535 {
 			fatal("src-port out of range: %d", *synSrcPort)
 		}
 		sp := scan.NewSYNProber(ports, *retries, *grace, uint16(*synSrcPort), limiter)
+		sp.Progress = &scanned
+		progTotal = space.Total() * uint64(max(*retries, 1))
 		fmt.Fprintf(os.Stderr, "[*] syn     : src-port=%d (scope iptables RST rule to this port)\n", sp.SrcPort())
 		prober = sp
 	default:
@@ -138,8 +144,6 @@ func main() {
 
 	// Optional progress reporting into the store (read by ns-status). Discover
 	// only writes its own heartbeat here — it never touches the work queue.
-	var scanned, found int64
-	addrs := space.Randomized(seed)
 	var progStop func()
 	if *dbPath != "" {
 		st, err := store.Open(*dbPath)
@@ -147,11 +151,11 @@ func main() {
 			fatal("open store: %v", err)
 		}
 		defer st.Close()
-		addrs = counted(addrs, &scanned)
-		progStop = startProgress(st, space.Total(), &scanned, &found)
+		progStop = startProgress(st, progTotal, &scanned, &found)
 	}
 
-	// Encode discovered hosts to stdout while the prober runs.
+	// Encode discovered hosts to stdout while the prober runs, flushing each one
+	// immediately so downstream (ns-ingest) sees hosts live, not at the end.
 	out := make(chan model.WireRecord, 256)
 	enc := stream.NewEncoder(os.Stdout)
 	encDone := make(chan struct{})
@@ -161,15 +165,15 @@ func main() {
 			if err := enc.Encode(rec); err != nil {
 				fmt.Fprintf(os.Stderr, "[!] encode: %v\n", err)
 			}
+			if err := enc.Flush(); err != nil {
+				fmt.Fprintf(os.Stderr, "[!] flush: %v\n", err)
+			}
 			atomic.AddInt64(&found, 1)
-		}
-		if err := enc.Flush(); err != nil {
-			fmt.Fprintf(os.Stderr, "[!] flush: %v\n", err)
 		}
 	}()
 
 	start := time.Now()
-	runErr := prober.Run(ctx, addrs, out)
+	runErr := prober.Run(ctx, space.Randomized(seed), out)
 	close(out)
 	<-encDone
 	if progStop != nil {
@@ -232,16 +236,6 @@ func raiseNOFILE() uint64 {
 		_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim)
 	}
 	return uint64(lim.Cur)
-}
-
-// counted wraps an address sequence to count how many addresses are emitted.
-func counted(seq iter.Seq[netip.Addr], counter *int64) iter.Seq[netip.Addr] {
-	return func(yield func(netip.Addr) bool) {
-		seq(func(a netip.Addr) bool {
-			atomic.AddInt64(counter, 1)
-			return yield(a)
-		})
-	}
 }
 
 // startProgress writes a discovery heartbeat (scanned/total, found) every second

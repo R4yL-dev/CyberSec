@@ -35,10 +35,11 @@ import (
 // v1 buffers responding hosts and emits them after a grace period rather than
 // streaming — the responding set is a tiny fraction of the address space.
 type SYNProber struct {
-	Ports   []uint16
-	Retries int
-	Grace   time.Duration
-	Limiter *rate.Limiter // optional throttle
+	Ports    []uint16
+	Retries  int
+	Grace    time.Duration
+	Limiter  *rate.Limiter // optional throttle
+	Progress *int64        // optional: incremented once per address sent (per pass)
 
 	secret  uint32
 	srcPort uint16
@@ -181,6 +182,9 @@ func (p *SYNProber) send(ctx context.Context, fd int, src4 [4]byte, addrs iter.S
 		for addr := range addrs {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if p.Progress != nil {
+				atomic.AddInt64(p.Progress, 1)
 			}
 			dst4 := addr.As4()
 			for _, port := range p.Ports {
