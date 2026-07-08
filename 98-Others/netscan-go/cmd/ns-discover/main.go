@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"netscan/internal/fmtx"
 	"netscan/internal/model"
 	"netscan/internal/scan"
 	"netscan/internal/store"
@@ -81,8 +82,13 @@ func main() {
 		fatal("%v", err)
 	}
 	if space.Total() > bigScanThreshold && !*yes {
-		fatal("target space is %d addresses (> %d); re-run with --yes to confirm",
-			space.Total(), bigScanThreshold)
+		probes := space.Total() * uint64(len(ports))
+		est := ""
+		if *ratePPS > 0 {
+			est = fmt.Sprintf(" ≈ %s at %.0f pps", fmtx.Duration(time.Duration(float64(probes)/(*ratePPS)*float64(time.Second))), *ratePPS)
+		}
+		fatal("large scan: %s addresses × %d ports = %s probes%s.\n  Re-run with --yes to confirm.",
+			fmtx.Count(space.Total()), len(ports), fmtx.Count(probes), est)
 	}
 
 	// --rate 0 (unlimited) is the top cause of self-inflicted outages: behind a
@@ -187,9 +193,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Fprintf(os.Stderr, "[*] targets : %d addresses (seed=%d)\n", space.Total(), seed)
+	fmt.Fprintf(os.Stderr, "[*] targets : %s addresses (seed=%d)\n", fmtx.Count(space.Total()), seed)
 	fmt.Fprintf(os.Stderr, "[*] ports   : %s | mode=%s | rate=%.0f pps | workers=%d\n",
 		*portsFlag, *mode, *ratePPS, effWorkers)
+	if st != nil && !*resume {
+		fmt.Fprintln(os.Stderr, "[*] resume  : checkpoint on — Ctrl+C is safe; re-run the same command with --resume")
+	}
 
 	// Progress + checkpoint reporting into the store (read by ns-status). Discover
 	// only writes its own heartbeat/checkpoint here — it never touches the work queue.
