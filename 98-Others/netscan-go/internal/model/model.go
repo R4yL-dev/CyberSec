@@ -76,6 +76,9 @@ func (h *HostRecord) Merge(in *HostRecord) {
 		if pin.TLSDeep != nil {
 			pe.TLSDeep = pin.TLSDeep
 		}
+		if pin.Crawl != nil {
+			pe.Crawl = pin.Crawl
+		}
 	}
 	if len(in.Status) > 0 {
 		if h.Status == nil {
@@ -100,6 +103,23 @@ type PortInfo struct {
 	TLS     *TLSInfo     `json:"tls,omitempty"`
 	Web     *WebInfo     `json:"web,omitempty"`
 	TLSDeep *TLSDeepInfo `json:"tls_deep,omitempty"`
+	Crawl   *CrawlInfo   `json:"crawl,omitempty"`
+}
+
+// CrawlInfo holds the derived results of the crawl palier: which probed paths
+// exist and the HTTP methods the server advertises.
+type CrawlInfo struct {
+	Paths   []FoundPath `json:"paths,omitempty"`
+	Methods []string    `json:"methods,omitempty"` // from an OPTIONS Allow header
+}
+
+// FoundPath is one probed path that returned a non-404 response.
+type FoundPath struct {
+	Path      string `json:"path"`
+	Status    int    `json:"status"`
+	Size      int64  `json:"size"`
+	Category  string `json:"category"`            // well-known | sensitive
+	Signature string `json:"signature,omitempty"` // short marker confirming the leak
 }
 
 // TLSDeepInfo holds the derived results of the tls-deep palier: supported
