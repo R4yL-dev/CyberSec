@@ -170,9 +170,12 @@ LOCKED` or onto broker consumer groups; keep the same `Store` method contract.
 
 ---
 
-## 5. Streaming SYN output + `open_ports` union on ingest
+## 5. Streaming SYN output + `open_ports` union on ingest — DONE
 
-**Status:** not started. Current SYN prober buffers, current `Ingest` overwrites `open_ports`.
+**Status:** ✅ implemented. `internal/scan/syn.go` now streams a `WireRecord` per open port as
+each SYN-ACK is validated (deduplicated in the receiver), and `store.Ingest` unions `open_ports`
+(read-merge-write in the write tx) instead of overwriting. SYN mode therefore overlaps enrichment
+just like connect mode. Kept below for the record.
 
 **What.** (a) Make the SYN prober emit hosts as replies arrive instead of buffering until the
 grace period. (b) Make `ns-ingest` **union** a host's `open_ports` on re-ingest instead of

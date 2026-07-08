@@ -271,8 +271,8 @@ no privilege, and is the reference implementation. Rate-limited by a token bucke
 the TCP sequence number is a keyed cookie derived from the destination and a per-run secret.
 Incoming SYN-ACKs are captured with libpcap (BPF-filtered to the scan's source port) and
 validated by checking `ack == cookie+1` — so no per-target state is kept. After sending, it
-waits `--grace` for late replies. v1 buffers responding hosts and emits them after the grace
-period rather than streaming.
+waits `--grace` for late replies. Responding hosts are streamed as their SYN-ACKs arrive (one
+NDJSON record per open port, deduplicated), so enrichment overlaps discovery.
 
 <a name="the-kernel-rst-pitfall"></a>**The kernel-RST pitfall.** When a SYN-ACK arrives for a
 connection the kernel has no socket for, the kernel replies with a RST — harmless to capture (we
@@ -393,8 +393,8 @@ Anticipated by the architecture but not built in v1:
   in the meantime.
 - **Postgres / message broker.** The `Store` interface is the seam for a multi-machine backend
   when single-node SQLite is outgrown.
-- **Streaming SYN output.** SYN discovery currently buffers responders and emits after the grace
-  period rather than streaming them as they arrive.
+- *(done)* Streaming SYN output and `open_ports` union on ingest — SYN now emits hosts live as
+  SYN-ACKs arrive, so enrichment overlaps discovery in SYN mode too.
 
 ## Project layout
 
