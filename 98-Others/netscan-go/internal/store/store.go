@@ -21,6 +21,14 @@ const (
 	StateFailed  = "failed" // dead-lettered
 )
 
+// Coordination keys/values for the meta table. ns-ingest publishes its state so
+// a following ns-enrich knows when no more work is coming.
+const (
+	MetaIngestState = "ingest.state"
+	IngestRunning   = "running"
+	IngestDone      = "done"
+)
+
 // WorkItem is a claimed unit of work for one host at one stage.
 type WorkItem struct {
 	ID       int64
@@ -30,10 +38,13 @@ type WorkItem struct {
 }
 
 // RunStat is a heartbeat/progress record for a running binary instance.
+// Counter is the primary progress number (addresses scanned, hosts ingested,
+// items enriched); Total is its denominator when known (0 = unknown).
 type RunStat struct {
 	Tool      string
 	PID       int
 	Counter   int64
+	Total     int64
 	Note      string
 	UpdatedAt time.Time
 }
@@ -81,6 +92,11 @@ type Store interface {
 
 	// Heartbeat records liveness/progress for a binary instance.
 	Heartbeat(ctx context.Context, r RunStat) error
+
+	// SetMeta / GetMeta store small key/value coordination state (e.g. whether
+	// ingestion is still running). GetMeta returns "" for a missing key.
+	SetMeta(ctx context.Context, key, value string) error
+	GetMeta(ctx context.Context, key string) (string, error)
 
 	// Stats returns a snapshot for monitoring.
 	Stats(ctx context.Context) (Stats, error)

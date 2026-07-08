@@ -87,9 +87,14 @@ CREATE TABLE IF NOT EXISTS runs (
 	tool       TEXT NOT NULL,
 	pid        INTEGER NOT NULL,
 	counter    INTEGER NOT NULL DEFAULT 0,
+	total      INTEGER NOT NULL DEFAULT 0,
 	note       TEXT,
 	updated_at INTEGER NOT NULL,
 	UNIQUE(tool, pid)
+);
+CREATE TABLE IF NOT EXISTS meta (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
 );
 `
 
@@ -277,12 +282,29 @@ func (s *SQLite) Reschedule(ctx context.Context, ip netip.Addr, stage string) er
 
 func (s *SQLite) Heartbeat(ctx context.Context, r RunStat) error {
 	_, err := s.w.ExecContext(ctx, `
-		INSERT INTO runs(tool, pid, counter, note, updated_at)
-		VALUES(?, ?, ?, ?, ?)
+		INSERT INTO runs(tool, pid, counter, total, note, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?)
 		ON CONFLICT(tool, pid) DO UPDATE SET
-			counter=excluded.counter, note=excluded.note, updated_at=excluded.updated_at`,
-		r.Tool, r.PID, r.Counter, r.Note, ms(r.UpdatedAt))
+			counter=excluded.counter, total=excluded.total,
+			note=excluded.note, updated_at=excluded.updated_at`,
+		r.Tool, r.PID, r.Counter, r.Total, r.Note, ms(r.UpdatedAt))
 	return err
+}
+
+func (s *SQLite) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.w.ExecContext(ctx, `
+		INSERT INTO meta(key, value) VALUES(?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+func (s *SQLite) GetMeta(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.r.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return v, err
 }
 
 func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
@@ -300,7 +322,7 @@ func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
 	}
 
 	runs, err := s.r.QueryContext(ctx, `
-		SELECT tool, pid, counter, note, updated_at FROM runs ORDER BY updated_at DESC LIMIT 20`)
+		SELECT tool, pid, counter, total, note, updated_at FROM runs ORDER BY updated_at DESC LIMIT 20`)
 	if err != nil {
 		return st, err
 	}
@@ -311,7 +333,7 @@ func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
 			note sql.NullString
 			upd  int64
 		)
-		if err := runs.Scan(&rs.Tool, &rs.PID, &rs.Counter, &note, &upd); err != nil {
+		if err := runs.Scan(&rs.Tool, &rs.PID, &rs.Counter, &rs.Total, &note, &upd); err != nil {
 			return st, err
 		}
 		rs.Note = note.String
