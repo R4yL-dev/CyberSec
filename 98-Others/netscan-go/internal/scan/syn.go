@@ -171,18 +171,23 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 	return ctx.Err()
 }
 
+// send transmits one SYN per (address, port), repeated as `Retries` full passes
+// over the target sequence rather than back-to-back copies — spacing
+// retransmits across the whole scan is far more robust against burst loss
+// (masscan does the same). It re-ranges addrs each pass, which requires the
+// sequence to be restartable; target.Space.Randomized replays the same order.
 func (p *SYNProber) send(ctx context.Context, fd int, src4 [4]byte, addrs iter.Seq[netip.Addr]) error {
-	for addr := range addrs {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		dst4 := addr.As4()
-		for _, port := range p.Ports {
-			pkt, err := p.craft(src4, dst4, port)
-			if err != nil {
-				continue
+	for pass := 0; pass < p.Retries; pass++ {
+		for addr := range addrs {
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-			for r := 0; r < p.Retries; r++ {
+			dst4 := addr.As4()
+			for _, port := range p.Ports {
+				pkt, err := p.craft(src4, dst4, port)
+				if err != nil {
+					continue
+				}
 				if p.Limiter != nil {
 					if err := p.Limiter.Wait(ctx); err != nil {
 						return err

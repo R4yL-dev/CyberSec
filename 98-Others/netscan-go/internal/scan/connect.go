@@ -5,6 +5,7 @@ import (
 	"iter"
 	"net"
 	"net/netip"
+	"sort"
 	"sync"
 	"time"
 
@@ -67,18 +68,44 @@ func (p *ConnectProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out
 }
 
 func (p *ConnectProber) scanHost(ctx context.Context, addr netip.Addr) []uint16 {
-	var open []uint16
-	for _, port := range p.Ports {
-		if p.Limiter != nil {
-			if err := p.Limiter.Wait(ctx); err != nil {
-				return open
-			}
+	// Single-port fast path avoids goroutine overhead.
+	if len(p.Ports) == 1 {
+		if p.waitDial(ctx, addr, p.Ports[0]) {
+			return []uint16{p.Ports[0]}
 		}
-		if p.dial(ctx, addr, port) {
-			open = append(open, port)
+		return nil
+	}
+	// Probe a host's ports concurrently so one slow/timing-out port doesn't
+	// serialize the others; per-host latency becomes max(timeouts), not the sum.
+	var (
+		mu   sync.Mutex
+		open []uint16
+		wg   sync.WaitGroup
+	)
+	for _, port := range p.Ports {
+		wg.Add(1)
+		go func(port uint16) {
+			defer wg.Done()
+			if p.waitDial(ctx, addr, port) {
+				mu.Lock()
+				open = append(open, port)
+				mu.Unlock()
+			}
+		}(port)
+	}
+	wg.Wait()
+	sort.Slice(open, func(i, j int) bool { return open[i] < open[j] })
+	return open
+}
+
+// waitDial applies the rate limit then dials one port, reporting whether it is open.
+func (p *ConnectProber) waitDial(ctx context.Context, addr netip.Addr, port uint16) bool {
+	if p.Limiter != nil {
+		if err := p.Limiter.Wait(ctx); err != nil {
+			return false
 		}
 	}
-	return open
+	return p.dial(ctx, addr, port)
 }
 
 func (p *ConnectProber) dial(ctx context.Context, addr netip.Addr, port uint16) bool {
