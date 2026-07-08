@@ -371,14 +371,19 @@ func rewindPos(pos uint64, mode string, workers int) uint64 {
 	return 0
 }
 
-// startProgress writes a discovery heartbeat (scanned/total, found) and a resume
-// checkpoint every second until the returned stop func is called (which also
-// writes a final one).
-func startProgress(st *store.SQLite, total uint64, scanned, found *int64,
-	sig string, seed uint64, pos *uint64, addrTotal uint64) func() {
+// startReporter runs a 1s ticker that — with a store — writes the discovery
+// heartbeat + resume checkpoint, and — with progress — renders an inline progress
+// line to stderr (a \r-updated line on a TTY, periodic plain lines otherwise).
+// The returned stop func emits a final update and returns.
+func startReporter(st *store.SQLite, progress, tty bool, total uint64,
+	scanned, found *int64, sig string, seed uint64, pos *uint64, addrTotal uint64) func() {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
-	write := func() {
+
+	heartbeat := func() {
+		if st == nil {
+			return
+		}
 		_ = st.Heartbeat(context.Background(), store.RunStat{
 			Tool:      "ns-discover",
 			PID:       os.Getpid(),
@@ -389,6 +394,44 @@ func startProgress(st *store.SQLite, total uint64, scanned, found *int64,
 		})
 		writeCheckpoint(st, sig, seed, pos, addrTotal)
 	}
+
+	var prevScanned int64
+	var prevAt, lastPlain time.Time
+	renderProgress := func(final bool) {
+		if !progress {
+			return
+		}
+		now := time.Now()
+		cur := atomic.LoadInt64(scanned)
+		pps := 0.0
+		if !prevAt.IsZero() {
+			if dt := now.Sub(prevAt).Seconds(); dt > 0 {
+				pps = float64(cur-prevScanned) / dt
+			}
+		}
+		prevScanned, prevAt = cur, now
+
+		pct := 0.0
+		if total > 0 {
+			pct = 100 * float64(cur) / float64(total)
+		}
+		eta := ""
+		if pps > 0 && uint64(cur) < total {
+			eta = " | ETA " + fmtx.Duration(time.Duration(float64(total-uint64(cur))/pps*float64(time.Second)))
+		}
+		line := fmt.Sprintf("%.1f%% | %.0f pps | %d found%s", pct, pps, atomic.LoadInt64(found), eta)
+
+		if tty {
+			fmt.Fprintf(os.Stderr, "\r\033[K[*] %s", line) // overwrite in place
+			if final {
+				fmt.Fprintln(os.Stderr)
+			}
+		} else if final || now.Sub(lastPlain) >= 10*time.Second {
+			fmt.Fprintf(os.Stderr, "[*] %s\n", line)
+			lastPlain = now
+		}
+	}
+
 	go func() {
 		defer close(stopped)
 		tk := time.NewTicker(time.Second)
@@ -396,14 +439,25 @@ func startProgress(st *store.SQLite, total uint64, scanned, found *int64,
 		for {
 			select {
 			case <-done:
-				write()
+				heartbeat()
+				renderProgress(true)
 				return
 			case <-tk.C:
-				write()
+				heartbeat()
+				renderProgress(false)
 			}
 		}
 	}()
 	return func() { close(done); <-stopped }
+}
+
+// isTerminal reports whether f is a character device (an interactive terminal).
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func gatherTargets(flagVal string, args []string) []string {
