@@ -154,10 +154,12 @@ func main() {
 
 	var limiter *rate.Limiter
 	if *ratePPS > 0 {
-		burst := effWorkers
-		if burst < 1 {
-			burst = 1
-		}
+		// Burst must be generous enough to amortize per-token Wait overhead,
+		// especially in SYN mode (single sender, no worker pool: effWorkers is
+		// unset there). ~100ms of packets lets Wait hand out tokens in batches
+		// instead of sleeping ~200µs before every send (which caps far below the
+		// target). In connect mode the worker count is the natural burst.
+		burst := max(effWorkers, int(*ratePPS/10), 1)
 		limiter = rate.NewLimiter(rate.Limit(*ratePPS), burst)
 	}
 
