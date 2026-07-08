@@ -12,6 +12,41 @@ import (
 	"netscan/internal/model"
 )
 
+// TestCrawlBlanketResponseFiltered: a server that answers every path with the
+// same 403 (like Cloudflare) must yield no "found" paths — the baseline catches it.
+func TestCrawlBlanketResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("error 1020"))
+	}))
+	defer srv.Close()
+
+	ap, _ := netip.ParseAddrPort(strings.TrimPrefix(srv.URL, "http://"))
+	host := &model.HostRecord{
+		IP:        ap.Addr(),
+		OpenPorts: []uint16{ap.Port()},
+		Ports:     map[uint16]*model.PortInfo{ap.Port(): {Port: ap.Port(), Protocol: model.ProtoHTTP, HTTP: &model.HTTPInfo{Status: 403}}},
+	}
+	if err := NewCrawl(2*time.Second).Enrich(context.Background(), host); err != nil {
+		t.Fatal(err)
+	}
+	if cr := host.Ports[ap.Port()].Crawl; cr != nil && len(cr.Paths) != 0 {
+		t.Fatalf("blanket-403 server should yield no found paths, got %+v", cr.Paths)
+	}
+}
+
+func TestIsHTTPSMisdirect(t *testing.T) {
+	yes := &model.HTTPInfo{Status: 400, Title: "400 The plain HTTP request was sent to HTTPS port"}
+	no1 := &model.HTTPInfo{Status: 400, Title: "400 Bad Request"}
+	no2 := &model.HTTPInfo{Status: 200, Title: "sent to HTTPS port"}
+	if !isHTTPSMisdirect(yes) {
+		t.Fatal("should detect the HTTPS-misdirect 400")
+	}
+	if isHTTPSMisdirect(no1) || isHTTPSMisdirect(no2) {
+		t.Fatal("false positive on HTTPS-misdirect detection")
+	}
+}
+
 func TestCrawl(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
