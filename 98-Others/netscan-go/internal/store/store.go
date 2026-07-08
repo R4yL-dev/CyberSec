@@ -69,8 +69,9 @@ type Stats struct {
 // provided today; the interface is the seam for a future Postgres backend.
 type Store interface {
 	// Ingest upserts a discovered host and ensures a pending work item exists
-	// for stage (idempotent — no duplicate pending items).
-	Ingest(ctx context.Context, rec model.WireRecord, stage string) error
+	// for stage (idempotent — no duplicate pending items). geo (may be nil) is
+	// IP-level context written on first insert only.
+	Ingest(ctx context.Context, rec model.WireRecord, stage string, geo *model.GeoInfo) error
 
 	// Claim leases up to n claimable items for stage (pending, or leased with an
 	// expired lease), bumping their attempt count.

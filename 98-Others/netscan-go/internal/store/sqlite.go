@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS hosts (
 	data       TEXT NOT NULL DEFAULT '{}',
 	status     TEXT NOT NULL DEFAULT '{}',
 	ptr        TEXT NOT NULL DEFAULT '',
+	geo        TEXT NOT NULL DEFAULT '',
 	attempts   INTEGER NOT NULL DEFAULT 0,
 	first_seen INTEGER NOT NULL,
 	last_seen  INTEGER NOT NULL
@@ -125,10 +126,16 @@ func nowMS() int64             { return time.Now().UnixMilli() }
 func ms(t time.Time) int64     { return t.UnixMilli() }
 func fromMS(v int64) time.Time { return time.UnixMilli(v).UTC() }
 
-func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string) error {
+func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string, geo *model.GeoInfo) error {
 	now := ms(rec.DiscoveredAt)
 	if now == 0 {
 		now = nowMS()
+	}
+	geoJSON := ""
+	if geo != nil {
+		if b, err := json.Marshal(geo); err == nil {
+			geoJSON = string(b)
+		}
 	}
 
 	tx, err := s.w.BeginTx(ctx, nil)
