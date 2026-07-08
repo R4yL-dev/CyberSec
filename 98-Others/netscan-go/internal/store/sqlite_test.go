@@ -33,7 +33,7 @@ func TestIngestClaimHost(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	if err := s.Ingest(ctx, rec("1.1.1.1", 80, 443), model.StageLight); err != nil {
+	if err := s.Ingest(ctx, rec("1.1.1.1", 80, 443), model.StageLight, nil); err != nil {
 		t.Fatal(err)
 	}
 	items, err := s.Claim(ctx, model.StageLight, 10, time.Second)
@@ -61,10 +61,10 @@ func TestIngestUnionsOpenPorts(t *testing.T) {
 	s := openTest(t)
 
 	// SYN streaming ingests a host's ports in separate records; they must union.
-	if err := s.Ingest(ctx, rec("9.9.9.9", 80), model.StageLight); err != nil {
+	if err := s.Ingest(ctx, rec("9.9.9.9", 80), model.StageLight, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Ingest(ctx, rec("9.9.9.9", 443), model.StageLight); err != nil {
+	if err := s.Ingest(ctx, rec("9.9.9.9", 443), model.StageLight, nil); err != nil {
 		t.Fatal(err)
 	}
 	h, err := s.Host(ctx, netip.MustParseAddr("9.9.9.9"))
@@ -76,12 +76,36 @@ func TestIngestUnionsOpenPorts(t *testing.T) {
 	}
 }
 
+func TestGeoPersistedAndPreserved(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	ip := netip.MustParseAddr("1.1.1.1")
+
+	geo := &model.GeoInfo{Country: "US", ASN: 13335, Org: "Cloudflare"}
+	if err := s.Ingest(ctx, rec("1.1.1.1", 443), model.StageLight, geo); err != nil {
+		t.Fatal(err)
+	}
+	// Re-ingest without geo must NOT wipe it (set once at first insert).
+	if err := s.Ingest(ctx, rec("1.1.1.1", 80), model.StageLight, nil); err != nil {
+		t.Fatal(err)
+	}
+	// An enrichment Complete must preserve geo too.
+	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
+	h, _ := s.Host(ctx, ip)
+	s.Complete(ctx, items[0].ID, h)
+
+	got, _ := s.Host(ctx, ip)
+	if got.Geo == nil || got.Geo.Country != "US" || got.Geo.ASN != 13335 || got.Geo.Org != "Cloudflare" {
+		t.Fatalf("geo lost/altered: %+v", got.Geo)
+	}
+}
+
 func TestDedupPending(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
 	for i := 0; i < 3; i++ {
-		if err := s.Ingest(ctx, rec("2.2.2.2", 80), model.StageLight); err != nil {
+		if err := s.Ingest(ctx, rec("2.2.2.2", 80), model.StageLight, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -98,7 +122,7 @@ func TestCompleteRemovesFromQueue(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	s.Ingest(ctx, rec("3.3.3.3", 443), model.StageLight)
+	s.Ingest(ctx, rec("3.3.3.3", 443), model.StageLight, nil)
 	items, _ := s.Claim(ctx, model.StageLight, 10, time.Second)
 
 	h, _ := s.Host(ctx, items[0].IP)
@@ -127,7 +151,7 @@ func TestFailBackoffThenDeadLetter(t *testing.T) {
 	s := openTest(t)
 	const maxAttempts = 2
 
-	s.Ingest(ctx, rec("4.4.4.4", 80), model.StageLight)
+	s.Ingest(ctx, rec("4.4.4.4", 80), model.StageLight, nil)
 
 	// attempt 1 -> fail -> still pending (attempts 1 < max)
 	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
@@ -156,7 +180,7 @@ func TestLeaseExpiryReclaim(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	s.Ingest(ctx, rec("5.5.5.5", 80), model.StageLight)
+	s.Ingest(ctx, rec("5.5.5.5", 80), model.StageLight, nil)
 	// Claim with a tiny lease; simulate a crashed worker that never completes.
 	if items, _ := s.Claim(ctx, model.StageLight, 1, time.Millisecond); len(items) != 1 {
 		t.Fatalf("first claim failed: %d", len(items))
@@ -178,7 +202,7 @@ func TestReschedule(t *testing.T) {
 	s := openTest(t)
 	ip := netip.MustParseAddr("6.6.6.6")
 
-	s.Ingest(ctx, rec("6.6.6.6", 80), model.StageLight)
+	s.Ingest(ctx, rec("6.6.6.6", 80), model.StageLight, nil)
 	items, _ := s.Claim(ctx, model.StageLight, 1, time.Second)
 	h, _ := s.Host(ctx, ip)
 	s.Complete(ctx, items[0].ID, h)
@@ -264,7 +288,7 @@ func TestConcurrentProcessesNoLock(t *testing.T) {
 			defer wg.Done()
 			// "process 1": the union path (SELECT + INSERT in one write tx), twice.
 			for _, port := range []uint16{80, 443} {
-				if err := s1.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{port}, DiscoveredAt: time.Now()}, model.StageLight); err != nil {
+				if err := s1.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{port}, DiscoveredAt: time.Now()}, model.StageLight, nil); err != nil {
 					errCh <- err
 				}
 			}
@@ -307,7 +331,7 @@ func TestConcurrentIngestClaimNoLock(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ip := netip.AddrFrom4([4]byte{10, 0, byte(i >> 8), byte(i)})
-			if err := s.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{80}, DiscoveredAt: time.Now()}, model.StageLight); err != nil {
+			if err := s.Ingest(ctx, model.WireRecord{IP: ip, OpenPorts: []uint16{80}, DiscoveredAt: time.Now()}, model.StageLight, nil); err != nil {
 				errCh <- err
 			}
 		}(i)

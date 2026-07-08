@@ -5,11 +5,11 @@ DISCOVER := $(BIN_DIR)/ns-discover
 CAPS     := cap_net_raw,cap_net_admin=eip
 PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build syn test vet tidy setcap dropcap install uninstall clean help
+.PHONY: all build setup syn geoip test vet tidy setcap dropcap install uninstall clean help
 
 all: build
 
-## build: compile all binaries into bin/ (no sudo)
+## build: compile all binaries into bin/ (no sudo, no network)
 build:
 	@mkdir -p $(BIN_DIR)
 	@for b in $(BINS); do echo "  build $$b"; go build -o $(BIN_DIR)/$$b ./cmd/$$b; done
@@ -17,8 +17,15 @@ build:
 	@getcap $(DISCOVER) 2>/dev/null | grep -q cap_net_raw || \
 		echo "  note: SYN mode needs the raw-socket capability — run 'make setcap' (or 'make syn')"
 
+## setup: build + download GeoIP databases (first-time "give me everything", no sudo)
+setup: build geoip
+
 ## syn: build, then grant the SYN capability in one step
 syn: build setcap
+
+## geoip: download the free DB-IP lite country+ASN databases into data/ (idempotent)
+geoip:
+	@bash scripts/fetch-geoip.sh
 
 ## setcap: grant raw-socket/pcap capability to ns-discover (sudo). Cleared on each build.
 setcap: $(DISCOVER)
