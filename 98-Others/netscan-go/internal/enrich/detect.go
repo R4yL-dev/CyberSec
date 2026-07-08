@@ -86,15 +86,12 @@ func (d *Detect) detect(ctx context.Context, ip netip.Addr, port uint16, pi *mod
 		}
 	}
 
-	tlsFirst := hint == "tls"
-	if tlsFirst {
-		if d.tryTLS(ctx, ip, port, pi) || d.tryHTTP(ctx, ip, port, false, pi) {
-			return
-		}
-	} else {
-		if d.tryHTTP(ctx, ip, port, false, pi) || d.tryTLS(ctx, ip, port, pi) {
-			return
-		}
+	// Always try TLS before plaintext HTTP: the TLS handshake is the definitive
+	// signal. An HTTPS server answers a plaintext GET with a "sent HTTP to HTTPS"
+	// 400 — probing HTTP first would misclassify it as http. The handshake
+	// fast-fails on a plaintext port, so TLS-first is cheap there too.
+	if d.tryTLS(ctx, ip, port, pi) || d.tryHTTP(ctx, ip, port, false, pi) {
+		return
 	}
 	pi.Protocol = model.ProtoUnknown
 }
