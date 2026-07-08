@@ -290,3 +290,12 @@ Lower-priority and **not** yet agreed in detail — capture only, do not treat a
   interface.
 - **Richer HTTP fidelity** (take `Server`/`title` from the first hop rather than the final
   response; configurable TLS ports instead of the hardcoded `{443}`).
+- **Adaptive rate governor (`--rate auto`)** — a feedback loop that periodically health-checks its
+  own connectivity (a fresh TCP connect to a known host, and/or a DNS lookup) and adjusts the rate
+  AIMD-style: ramp up while healthy, cut hard (×0.5) when the probe fails/slows. `rate.Limiter`
+  already supports live `SetLimit`, so the mechanism is cheap; the work is the governor + tuning.
+  **Deliberately deferred:** its main value is surviving upstream **NAT** connection-table
+  exhaustion, which is a dev-environment artifact (scanning from a NAT'd VM). In production on a
+  public IP (no NAT) you set a deliberate fixed rate, like masscan/zmap — which have no adaptive
+  mode. Revisit only if a production need for a self-throttling safety valve appears. A cheap
+  interim guard already exists: `ns-discover` refuses `--rate 0` (unlimited) without `--yes`.
