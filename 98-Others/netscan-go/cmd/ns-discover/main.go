@@ -395,21 +395,25 @@ func startReporter(st *store.SQLite, progress, tty bool, total uint64,
 		writeCheckpoint(st, sig, seed, pos, addrTotal)
 	}
 
-	var prevScanned int64
-	var prevAt, lastPlain time.Time
+	var lastScanned int64
+	var lastEmit time.Time
 	renderProgress := func(final bool) {
 		if !progress {
 			return
 		}
 		now := time.Now()
+		// TTY updates every tick; non-TTY only every 10s (and on the final call).
+		if !tty && !final && now.Sub(lastEmit) < 10*time.Second {
+			return
+		}
 		cur := atomic.LoadInt64(scanned)
 		pps := 0.0
-		if !prevAt.IsZero() {
-			if dt := now.Sub(prevAt).Seconds(); dt > 0 {
-				pps = float64(cur-prevScanned) / dt
+		if !lastEmit.IsZero() { // rate over the interval since the last emitted line
+			if dt := now.Sub(lastEmit).Seconds(); dt > 0 {
+				pps = float64(cur-lastScanned) / dt
 			}
 		}
-		prevScanned, prevAt = cur, now
+		lastScanned, lastEmit = cur, now
 
 		pct := 0.0
 		if total > 0 {
@@ -426,9 +430,8 @@ func startReporter(st *store.SQLite, progress, tty bool, total uint64,
 			if final {
 				fmt.Fprintln(os.Stderr)
 			}
-		} else if final || now.Sub(lastPlain) >= 10*time.Second {
+		} else {
 			fmt.Fprintf(os.Stderr, "[*] %s\n", line)
-			lastPlain = now
 		}
 	}
 
