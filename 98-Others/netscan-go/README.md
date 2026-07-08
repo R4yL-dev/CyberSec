@@ -31,9 +31,9 @@ the two halves have very different characteristics.
 
 ```
         Domain A — discovery (stream, forward-only)          Domain B — enrichment (re-entrant, stateful)
- CIDRs ─▶ ns-discover ──NDJSON──▶ ns-ingest ──▶ [ SQLite: hosts + work + runs ] ◀──▶ ns-enrich (palier "light")
-          SYN / connect            upsert host,       per-host state + work queue          claim → probe HTTP/TLS →
-          randomized order         enqueue("light")   leases, backoff, dead-letter          update record → complete
+ CIDRs ─▶ ns-discover ──NDJSON──▶ ns-ingest ──▶ [ SQLite: hosts + work + runs ] ◀──▶ ns-enrich (pipeline)
+          SYN / connect            upsert host,       per-host state + work queue          claim → detect/enrich →
+          randomized order         enqueue("detect")  leases, backoff, dead-letter          update record → complete
           excludes reserved                           (any stage can (re)schedule            or reschedule (backward)
           rate-limited                                 work for any stage)
                                                               ▲
@@ -118,7 +118,7 @@ Four binaries (`cmd/`):
 | Binary        | Role                                                                                 |
 |---------------|--------------------------------------------------------------------------------------|
 | `ns-discover` | Domain A. Enumerates CIDRs in random order, scans (connect/SYN), emits NDJSON hosts.  |
-| `ns-ingest`   | Reads discovery NDJSON, upserts hosts into the store, enqueues a `light` work item.   |
+| `ns-ingest`   | Reads discovery NDJSON, upserts hosts into the store, enqueues a `detect` work item. |
 | `ns-enrich`   | Domain B worker. Claims items for a stage, runs the enrichment palier, writes results.|
 | `ns-status`   | Read-only monitoring: counts, queue depth, recent hosts, per-binary heartbeats.       |
 
@@ -332,34 +332,37 @@ small derived results are persisted (never raw bodies).
 Built-in graph:
 
 ```
-light ──RespondedHTTP──▶ webinfo
-      ──RespondedHTTP──▶ crawl
-      ──HasTLS─────────▶ tls-deep
-      ──HasNonHTTP─────▶ banner
-      ──Always─────────▶ ptr
+detect ──IsWeb───▶ webinfo
+       ──IsWeb───▶ crawl
+       ──HasTLS──▶ tls-deep
+       ──Always──▶ ptr
 ```
 
-- **`light`** (entry): cheap HTTP probe per open port — `GET` (≤10 redirects, ≤64 KiB body) →
-  status, `Server`, redirect chain, `<title>`; plus a TLS cert summary on 443 (version, CN, SANs,
-  issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust. As the triage
-  palier it uses a **bounded 5s timeout** (independent of `--timeout`) and records **no HTTP block
-  when the port isn't HTTP** (e.g. SSH) — that routes the port to `banner`.
-- **`webinfo`** (gated on an HTTP response): one richer fetch → all headers, cookies, detected
-  technologies, security headers, a Shodan-style favicon hash, and **normalized services** —
-  product+version parsed from `Server` / `X-Powered-By` / `<meta generator>`, with a **CPE**
-  (`cpe:2.3:a:vendor:product:version`) when the vendor is known. This is the CVE-matching
-  foundation (`PortInfo.Services`); version data is best-effort (headers are often stripped).
-- **`tls-deep`** (gated on TLS): supported TLS versions + negotiated cipher per version, full cert
-  chain, weak-crypto warnings, and a **JARM** active fingerprint (~15 handshakes, hence gated).
-- **`crawl`** (gated on an HTTP response): probes a curated set of well-known paths
-  (`robots.txt`, `sitemap.xml`, `.well-known/…`) and sensitive exposures (`/.git/HEAD`, `/.env`,
-  `/server-status`, backups — signature-guarded against soft-404s), plus the `OPTIONS` methods.
-  The most request-heavy palier; only for authorized targets.
-- **`banner`** (gated on a non-HTTP open port): grabs the banner that server-speaks-first
-  services send on connect (SSH/FTP/SMTP/POP3/IMAP/MySQL…), stores it raw (truncated), and parses
-  a product+version `Service` (source `banner`) with a CPE when known. To use it, scan the relevant
-  ports (e.g. `--ports 22,21,25,3306,...`) — the default `80,443,8080` is web-only.
+- **`detect`** (entry): a **protocol-aware first contact** per open port, replacing the old
+  HTTP-only triage. It classifies each port into `{protocol, tls, banner}` with a bounded (5s)
+  sequence: peek for a server-speaks-first banner (SSH/FTP/SMTP…), else a TLS handshake (on **any**
+  port — the definitive signal), else a plaintext HTTP GET. The port only **hints the probe order**;
+  classification is by what actually answers, so **HTTPS on 8443 or SSH on 2222 are detected
+  correctly**. It fills `Protocol` (`http`/`https`/`tls`/`ssh`/`ftp`/`smtp`/`banner`/`unknown`), the
+  light HTTP summary, a TLS cert summary (any port), the raw banner, and a parsed `Service` from the
+  banner. `InsecureSkipVerify` — the goal is to observe, not trust.
+- **`webinfo`** (gated `IsWeb`): one richer fetch → all headers, cookies, detected technologies,
+  security headers, a Shodan-style favicon hash, and **normalized services** — product+version
+  parsed from `Server` / `X-Powered-By` / `<meta generator>`, with a **CPE**
+  (`cpe:2.3:a:vendor:product:version`) when the vendor is known. The CVE-matching foundation
+  (`PortInfo.Services`); version data is best-effort (headers are often stripped).
+- **`crawl`** (gated `IsWeb`): probes a curated set of well-known paths (`robots.txt`,
+  `sitemap.xml`, `.well-known/…`) and sensitive exposures (`/.git/HEAD`, `/.env`, `/server-status`,
+  backups — signature-guarded against soft-404s), plus the `OPTIONS` methods. The most
+  request-heavy palier; only for authorized targets.
+- **`tls-deep`** (gated `HasTLS`, i.e. any TLS port): supported TLS versions + negotiated cipher
+  per version, full cert chain, weak-crypto warnings, and a **JARM** active fingerprint (~15
+  handshakes, hence gated).
 - **`ptr`** (always): reverse DNS.
+
+Non-web service banners (SSH/FTP/SMTP/MySQL…) are grabbed by `detect` itself and parsed into a
+`Service` (source `banner`, with a CPE when known). To reach them, scan the relevant ports (e.g.
+`--ports 22,21,25,3306,...`) — the default `80,443,8080` is web-only.
 
 **GeoIP / ASN** is not a palier — it's a purely local lookup on the IP, done at **ingest** and
 stored on the host (`geo`). It is **on by default when a database is present**: run `make geoip`
