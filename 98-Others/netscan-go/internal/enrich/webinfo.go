@@ -30,10 +30,10 @@ func (w *Webinfo) Stage() string { return model.StageWebinfo }
 func (w *Webinfo) Enrich(ctx context.Context, host *model.HostRecord) error {
 	for _, port := range host.OpenPorts {
 		pi := host.Ports[port]
-		if pi == nil || pi.HTTP == nil || pi.HTTP.Status == 0 {
-			continue // light saw no HTTP response on this port
+		if pi == nil || (pi.Protocol != model.ProtoHTTP && pi.Protocol != model.ProtoHTTPS) {
+			continue // not a web port (per detect)
 		}
-		pi.Web, pi.Services = w.analyze(ctx, host.IP, port)
+		pi.Web, pi.Services = w.analyze(ctx, host.IP, port, pi.Protocol == model.ProtoHTTPS)
 	}
 	if host.Status == nil {
 		host.Status = make(map[string]string, 1)
@@ -52,9 +52,9 @@ func (w *Webinfo) client() *http.Client {
 	}
 }
 
-func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16) (*model.WebInfo, []model.Service) {
+func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16, https bool) (*model.WebInfo, []model.Service) {
 	scheme := "http"
-	if tlsPorts[port] {
+	if https {
 		scheme = "https"
 	}
 	base := fmt.Sprintf("%s://%s", scheme, netip.AddrPortFrom(ip, port))

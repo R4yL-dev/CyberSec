@@ -62,10 +62,10 @@ func (c *Crawl) Enrich(ctx context.Context, host *model.HostRecord) error {
 			break
 		}
 		pi := host.Ports[port]
-		if pi == nil || pi.HTTP == nil || pi.HTTP.Status == 0 {
-			continue // light saw no HTTP response here
+		if pi == nil || (pi.Protocol != model.ProtoHTTP && pi.Protocol != model.ProtoHTTPS) {
+			continue // not a web port (per detect)
 		}
-		pi.Crawl = c.crawl(ctx, host.IP, port)
+		pi.Crawl = c.crawl(ctx, host.IP, port, pi.Protocol == model.ProtoHTTPS)
 	}
 	if host.Status == nil {
 		host.Status = make(map[string]string, 1)
@@ -86,9 +86,9 @@ func (c *Crawl) client() *http.Client {
 	}
 }
 
-func (c *Crawl) crawl(ctx context.Context, ip netip.Addr, port uint16) *model.CrawlInfo {
+func (c *Crawl) crawl(ctx context.Context, ip netip.Addr, port uint16, https bool) *model.CrawlInfo {
 	scheme := "http"
-	if tlsPorts[port] {
+	if https {
 		scheme = "https"
 	}
 	base := scheme + "://" + netip.AddrPortFrom(ip, port).String()

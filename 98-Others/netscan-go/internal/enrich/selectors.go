@@ -2,49 +2,27 @@ package enrich
 
 import "netscan/internal/model"
 
-// Selectors used to gate transitions between paliers. Each is an enrich.Selector
-// (func(*model.HostRecord) bool) attached to a pipeline edge.
+// Selectors gate pipeline edges on the protocol detected by the detect palier.
+// Each is an enrich.Selector (func(*model.HostRecord) bool) on a pipeline edge.
 
 // Always advances every host.
 func Always(*model.HostRecord) bool { return true }
 
-// RespondedHTTP passes if any open port returned an HTTP status.
-func RespondedHTTP(h *model.HostRecord) bool {
+// IsWeb passes if any port speaks HTTP or HTTPS.
+func IsWeb(h *model.HostRecord) bool {
 	for _, p := range h.Ports {
-		if p.HTTP != nil && p.HTTP.Status != 0 {
+		if p != nil && (p.Protocol == model.ProtoHTTP || p.Protocol == model.ProtoHTTPS) {
 			return true
 		}
 	}
 	return false
 }
 
-// HasTLS passes if any port presented a TLS certificate.
+// HasTLS passes if any port completed a TLS handshake (on any port, not just
+// 443) — detect records a cert summary whenever TLS is present.
 func HasTLS(h *model.HostRecord) bool {
 	for _, p := range h.Ports {
-		if p.TLS != nil && p.TLS.Version != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// HasNonHTTP passes if any open port produced no HTTP response — a candidate
-// for non-web banner grabbing (light probes HTTP on every port, so a port with
-// no HTTP status is one that didn't speak HTTP).
-func HasNonHTTP(h *model.HostRecord) bool {
-	for _, port := range h.OpenPorts {
-		p := h.Ports[port]
-		if p == nil || p.HTTP == nil || p.HTTP.Status == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// StatusOK passes if any port returned HTTP 200.
-func StatusOK(h *model.HostRecord) bool {
-	for _, p := range h.Ports {
-		if p.HTTP != nil && p.HTTP.Status == 200 {
+		if p != nil && p.TLS != nil && p.TLS.Version != "" {
 			return true
 		}
 	}
