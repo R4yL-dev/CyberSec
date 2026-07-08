@@ -83,6 +83,17 @@ func main() {
 			space.Total(), bigScanThreshold)
 	}
 
+	// --rate 0 (unlimited) is the top cause of self-inflicted outages: behind a
+	// NAT it floods the router/host connection table until new flows (DNS) drop.
+	if *ratePPS == 0 {
+		if !*yes {
+			fatal("--rate 0 means UNLIMITED. On a large scan behind NAT this can exhaust the\n" +
+				"  router/host connection table and break your own connectivity (you keep pinging\n" +
+				"  IPs but DNS fails). Pick a rate (e.g. --rate 1000), or pass --yes to run unlimited.")
+		}
+		fmt.Fprintln(os.Stderr, "[!] rate=0 (unlimited) — watch your connectivity; Ctrl-C if DNS stalls")
+	}
+
 	seed := pickSeed(*seedFlag)
 
 	// Connect mode: lift the FD limit and size the worker pool so it can actually
