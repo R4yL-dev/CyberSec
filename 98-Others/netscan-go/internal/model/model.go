@@ -11,12 +11,23 @@ import (
 // Stage names for the domain-B work queue — one per enrichment palier. New
 // paliers add a constant here and an entry in internal/pipeline.
 const (
-	StageLight   = "light"    // cheap HTTP probe + TLS summary (entry palier)
+	StageDetect  = "detect"   // protocol-aware first contact (entry palier)
 	StageWebinfo = "webinfo"  // richer HTTP fetch + analyzers (tech, headers, favicon)
 	StagePTR     = "ptr"      // reverse DNS
 	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
 	StageCrawl   = "crawl"    // well-known + sensitive paths + HTTP methods
-	StageBanner  = "banner"   // non-web service banner grab (SSH/FTP/SMTP…)
+)
+
+// Detected L7 protocol for a port, set by the detect palier.
+const (
+	ProtoHTTP    = "http"
+	ProtoHTTPS   = "https"
+	ProtoTLS     = "tls" // TLS handshake succeeds but not HTTP
+	ProtoSSH     = "ssh"
+	ProtoFTP     = "ftp"
+	ProtoSMTP    = "smtp"
+	ProtoBanner  = "banner" // some other speak-first plaintext service
+	ProtoUnknown = "unknown"
 )
 
 // WireRecord is one line of NDJSON: what ns-discover emits for a responding
@@ -65,6 +76,9 @@ func (h *HostRecord) Merge(in *HostRecord) {
 			pe = &PortInfo{Port: port}
 			h.Ports[port] = pe
 		}
+		if pin.Protocol != "" {
+			pe.Protocol = pin.Protocol
+		}
 		if pin.HTTP != nil {
 			pe.HTTP = pin.HTTP
 		}
@@ -106,6 +120,7 @@ func (h *HostRecord) Merge(in *HostRecord) {
 // PortInfo accumulates what each palier learns about a single open port.
 type PortInfo struct {
 	Port     uint16       `json:"port"`
+	Protocol string       `json:"protocol,omitempty"`
 	HTTP     *HTTPInfo    `json:"http,omitempty"`
 	TLS      *TLSInfo     `json:"tls,omitempty"`
 	Web      *WebInfo     `json:"web,omitempty"`
