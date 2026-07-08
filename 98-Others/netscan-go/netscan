@@ -55,7 +55,7 @@ cmd_scan() {
 
 	# Enrichment runs concurrently with discovery: it drains the queue live and
 	# exits on its own once ingestion signals completion (store meta flag).
-	"$BIN/ns-enrich" --db "$db" --stage light --follow &
+	"$BIN/ns-enrich" --db "$db" --follow &
 	local epid=$!
 
 	echo "netscan: live view -> netscan status --db $db --interval 2s" >&2
