@@ -14,10 +14,14 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"iter"
+	"math"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,6 +29,7 @@ import (
 
 	"netscan/internal/model"
 	"netscan/internal/scan"
+	"netscan/internal/store"
 	"netscan/internal/stream"
 	"netscan/internal/target"
 )
@@ -42,7 +47,8 @@ func main() {
 		portsFlag   = flag.String("ports", "80,443", "comma-separated ports")
 		mode        = flag.String("mode", "connect", "discovery mode: connect|syn")
 		ratePPS     = flag.Float64("rate", 1000, "max probes per second (0 = unlimited)")
-		workers     = flag.Int("workers", 100, "concurrent workers (connect mode)")
+		workers     = flag.Int("workers", -1, "concurrent workers, connect mode (-1 = auto from rate x timeout, bounded by FDs)")
+		dbPath      = flag.String("db", "", "optional SQLite DB to report scan progress into (for ns-status)")
 		timeout     = flag.Duration("timeout", 1500*time.Millisecond, "per-connection timeout")
 		seedFlag    = flag.Int64("seed", -1, "permutation seed for reproducible order (-1 = random)")
 		retries     = flag.Int("retries", 1, "SYN retransmissions per probe (syn mode)")
@@ -81,9 +87,22 @@ func main() {
 
 	seed := pickSeed(*seedFlag)
 
+	// Connect mode: lift the FD limit and size the worker pool so it can actually
+	// sustain --rate (throughput ~= workers/timeout), bounded by available FDs.
+	effWorkers := *workers
+	if *mode == "connect" {
+		effWorkers = autoWorkers(*workers, *ratePPS, *timeout, len(ports), raiseNOFILE())
+		if *ratePPS > 0 {
+			if achievable := float64(effWorkers) / timeout.Seconds(); achievable < *ratePPS*0.9 {
+				fmt.Fprintf(os.Stderr, "[!] connect throughput capped at ~%.0f pps by workers/FDs "+
+					"(rate=%.0f); raise ulimit -n or use --mode syn\n", achievable, *ratePPS)
+			}
+		}
+	}
+
 	var limiter *rate.Limiter
 	if *ratePPS > 0 {
-		burst := *workers
+		burst := effWorkers
 		if burst < 1 {
 			burst = 1
 		}
@@ -95,7 +114,7 @@ func main() {
 	case "connect":
 		prober = &scan.ConnectProber{
 			Ports:   ports,
-			Workers: *workers,
+			Workers: effWorkers,
 			Timeout: *timeout,
 			Limiter: limiter,
 		}
@@ -115,12 +134,26 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "[*] targets : %d addresses (seed=%d)\n", space.Total(), seed)
 	fmt.Fprintf(os.Stderr, "[*] ports   : %s | mode=%s | rate=%.0f pps | workers=%d\n",
-		*portsFlag, *mode, *ratePPS, *workers)
+		*portsFlag, *mode, *ratePPS, effWorkers)
+
+	// Optional progress reporting into the store (read by ns-status). Discover
+	// only writes its own heartbeat here — it never touches the work queue.
+	var scanned, found int64
+	addrs := space.Randomized(seed)
+	var progStop func()
+	if *dbPath != "" {
+		st, err := store.Open(*dbPath)
+		if err != nil {
+			fatal("open store: %v", err)
+		}
+		defer st.Close()
+		addrs = counted(addrs, &scanned)
+		progStop = startProgress(st, space.Total(), &scanned, &found)
+	}
 
 	// Encode discovered hosts to stdout while the prober runs.
 	out := make(chan model.WireRecord, 256)
 	enc := stream.NewEncoder(os.Stdout)
-	var found int
 	encDone := make(chan struct{})
 	go func() {
 		defer close(encDone)
@@ -128,7 +161,7 @@ func main() {
 			if err := enc.Encode(rec); err != nil {
 				fmt.Fprintf(os.Stderr, "[!] encode: %v\n", err)
 			}
-			found++
+			atomic.AddInt64(&found, 1)
 		}
 		if err := enc.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "[!] flush: %v\n", err)
@@ -136,11 +169,15 @@ func main() {
 	}()
 
 	start := time.Now()
-	runErr := prober.Run(ctx, space.Randomized(seed), out)
+	runErr := prober.Run(ctx, addrs, out)
 	close(out)
 	<-encDone
+	if progStop != nil {
+		progStop()
+	}
 
-	fmt.Fprintf(os.Stderr, "[+] %d host(s) with open ports in %s\n", found, time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "[+] %d host(s) with open ports in %s\n",
+		atomic.LoadInt64(&found), time.Since(start).Round(time.Millisecond))
 	if runErr != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "[*] interrupted")
@@ -148,6 +185,95 @@ func main() {
 			fatal("%v", runErr)
 		}
 	}
+}
+
+const workerHardCap = 4096
+
+// autoWorkers picks the connect worker count. An explicit value (>0) wins.
+// Otherwise it targets rate x timeout concurrent dials (what it takes to sustain
+// the rate), bounded by the FD limit (each in-flight dial across all ports holds
+// one) and a hard cap.
+func autoWorkers(requested int, ratePPS float64, timeout time.Duration, nports int, nofile uint64) int {
+	if requested > 0 {
+		return requested
+	}
+	want := 100
+	if ratePPS > 0 {
+		want = int(math.Ceil(ratePPS * timeout.Seconds()))
+	}
+	if want < 1 {
+		want = 1
+	}
+	fdCap := workerHardCap
+	if nports > 0 && nofile > 128 {
+		if c := (int(nofile) - 128) / nports; c < fdCap {
+			fdCap = c
+		}
+	}
+	if fdCap < 1 {
+		fdCap = 1
+	}
+	if want > fdCap {
+		want = fdCap
+	}
+	return want
+}
+
+// raiseNOFILE best-effort raises the soft open-files limit to the hard limit and
+// returns the effective soft limit.
+func raiseNOFILE() uint64 {
+	var lim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {
+		return 1024
+	}
+	if lim.Cur < lim.Max {
+		lim.Cur = lim.Max
+		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim)
+		_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim)
+	}
+	return uint64(lim.Cur)
+}
+
+// counted wraps an address sequence to count how many addresses are emitted.
+func counted(seq iter.Seq[netip.Addr], counter *int64) iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		seq(func(a netip.Addr) bool {
+			atomic.AddInt64(counter, 1)
+			return yield(a)
+		})
+	}
+}
+
+// startProgress writes a discovery heartbeat (scanned/total, found) every second
+// until the returned stop func is called (which also writes a final heartbeat).
+func startProgress(st *store.SQLite, total uint64, scanned, found *int64) func() {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	write := func() {
+		_ = st.Heartbeat(context.Background(), store.RunStat{
+			Tool:      "ns-discover",
+			PID:       os.Getpid(),
+			Counter:   atomic.LoadInt64(scanned),
+			Total:     int64(total),
+			Note:      fmt.Sprintf("found=%d", atomic.LoadInt64(found)),
+			UpdatedAt: time.Now().UTC(),
+		})
+	}
+	go func() {
+		defer close(stopped)
+		tk := time.NewTicker(time.Second)
+		defer tk.Stop()
+		for {
+			select {
+			case <-done:
+				write()
+				return
+			case <-tk.C:
+				write()
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
 }
 
 func gatherTargets(flagVal string, args []string) []string {
