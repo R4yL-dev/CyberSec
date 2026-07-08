@@ -16,6 +16,7 @@ const (
 	StagePTR     = "ptr"      // reverse DNS
 	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
 	StageCrawl   = "crawl"    // well-known + sensitive paths + HTTP methods
+	StageBanner  = "banner"   // non-web service banner grab (SSH/FTP/SMTP…)
 )
 
 // WireRecord is one line of NDJSON: what ns-discover emits for a responding
@@ -82,6 +83,9 @@ func (h *HostRecord) Merge(in *HostRecord) {
 		if len(pin.Services) > 0 {
 			pe.Services = pin.Services
 		}
+		if pin.Banner != "" {
+			pe.Banner = pin.Banner
+		}
 	}
 	if len(in.Status) > 0 {
 		if h.Status == nil {
@@ -108,6 +112,7 @@ type PortInfo struct {
 	TLSDeep  *TLSDeepInfo `json:"tls_deep,omitempty"`
 	Crawl    *CrawlInfo   `json:"crawl,omitempty"`
 	Services []Service    `json:"services,omitempty"`
+	Banner   string       `json:"banner,omitempty"` // raw service banner (truncated), non-web ports
 }
 
 // Service is a normalized product+version identity for a port, the CVE-ready

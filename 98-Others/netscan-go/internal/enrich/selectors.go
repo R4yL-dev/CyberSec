@@ -28,6 +28,19 @@ func HasTLS(h *model.HostRecord) bool {
 	return false
 }
 
+// HasNonHTTP passes if any open port produced no HTTP response — a candidate
+// for non-web banner grabbing (light probes HTTP on every port, so a port with
+// no HTTP status is one that didn't speak HTTP).
+func HasNonHTTP(h *model.HostRecord) bool {
+	for _, port := range h.OpenPorts {
+		p := h.Ports[port]
+		if p == nil || p.HTTP == nil || p.HTTP.Status == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // StatusOK passes if any port returned HTTP 200.
 func StatusOK(h *model.HostRecord) bool {
 	for _, p := range h.Ports {
