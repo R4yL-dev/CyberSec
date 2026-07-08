@@ -85,8 +85,11 @@ completion), the two-level model (stages = one network interaction each, in-stag
 pure functions), and shipped `webinfo` (headers/cookies/tech-detect/security-headers/favicon-hash)
 + `ptr` + `tls-deep` (TLS versions/ciphers, cert chain, weak-crypto warnings, and a **JARM**
 fingerprint via `github.com/hdm/jarm-go`) gated after `light`. Concurrent paliers merge via
-`store.Complete`/`HostRecord.Merge` instead of clobbering. **Remaining:** more analyzers/paliers
-(crawl/sensitive paths, GeoIP/ASN, `recheck`) and config-file-driven wiring — all on this pattern.
+`store.Complete`/`HostRecord.Merge` instead of clobbering. **GeoIP/ASN** is done but
+**deliberately not a palier** — it's a local IP lookup annotated at ingest (`internal/geoip`,
+`ns-ingest --geoip/--asn` default-on from `data/`, `make geoip` downloads DB-IP lite). Design note:
+IP-only attributes annotate at ingest, not via the queue. **Remaining:** more analyzers/paliers
+(crawl/sensitive paths, `recheck`) and config-file-driven wiring — all on this pattern.
 
 **What.** Additional, heavier enrichment stages beyond `light` (e.g. full-body fetch and
 crawling, deeper certificate/chain analysis, tech fingerprinting), each gated by a **selector**
