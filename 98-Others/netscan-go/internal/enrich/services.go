@@ -35,6 +35,16 @@ var cpeVendorProduct = map[string]string{
 	"lighttpd":      "lighttpd:lighttpd",
 	"python":        "python:python",
 	"node.js":       "nodejs:node.js",
+	// non-web services (banner grab)
+	"postfix":  "postfix:postfix",
+	"exim":     "exim:exim",
+	"sendmail": "proofpoint:sendmail",
+	"mysql":    "oracle:mysql",
+	"mariadb":  "mariadb:mariadb",
+	"redis":    "redis:redis",
+	"proftpd":  "proftpd:proftpd",
+	"vsftpd":   "vsftpd:vsftpd",
+	"dovecot":  "dovecot:dovecot",
 }
 
 // parseVersionToken splits a token like "nginx/1.18.0 (Ubuntu)" or "PHP/8.2.1"

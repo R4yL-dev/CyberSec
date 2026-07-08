@@ -31,6 +31,7 @@ type Pipeline map[string]Stage
 //	light ──RespondedHTTP──▶ webinfo
 //	      ──RespondedHTTP──▶ crawl
 //	      ──HasTLS─────────▶ tls-deep
+//	      ──HasNonHTTP─────▶ banner
 //	      ──Always─────────▶ ptr
 func Default(timeout time.Duration) Pipeline {
 	return Pipeline{
@@ -40,12 +41,14 @@ func Default(timeout time.Duration) Pipeline {
 				{To: model.StageWebinfo, When: enrich.RespondedHTTP},
 				{To: model.StageCrawl, When: enrich.RespondedHTTP},
 				{To: model.StageTLSDeep, When: enrich.HasTLS},
+				{To: model.StageBanner, When: enrich.HasNonHTTP},
 				{To: model.StagePTR, When: enrich.Always},
 			},
 		},
 		model.StageWebinfo: {Enricher: enrich.NewWebinfo(timeout)},
 		model.StageTLSDeep: {Enricher: enrich.NewTLSDeep(timeout)},
 		model.StageCrawl:   {Enricher: enrich.NewCrawl(timeout)},
+		model.StageBanner:  {Enricher: enrich.NewBanner(timeout)},
 		model.StagePTR:     {Enricher: enrich.NewPTR()},
 	}
 }
