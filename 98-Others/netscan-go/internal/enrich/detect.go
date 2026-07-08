@@ -141,26 +141,25 @@ func classifyBanner(banner string) string {
 	}
 }
 
-// tryTLS reports whether the port speaks TLS; if so it records the cert summary
-// and whether HTTPS is served on top.
+// tryTLS reports whether the port speaks TLS (definitive handshake); if so it
+// records the cert summary and whether HTTPS is served on top.
 func (d *Detect) tryTLS(ctx context.Context, ip netip.Addr, port uint16, pi *model.PortInfo) bool {
-	if info, tlsInfo := d.httpProbe(ctx, ip, port, true); info != nil {
+	tlsInfo := d.tlsHandshake(ip, port)
+	if tlsInfo == nil {
+		return false // not TLS
+	}
+	pi.TLS = tlsInfo
+	if info := d.httpProbe(ctx, ip, port, true); info != nil {
 		pi.Protocol = model.ProtoHTTPS
 		pi.HTTP = info
-		pi.TLS = tlsInfo
-		return true
+	} else {
+		pi.Protocol = model.ProtoTLS // TLS but not HTTP
 	}
-	// GET over TLS failed — maybe TLS but not HTTP. Confirm with a bare handshake.
-	if tlsInfo := d.tlsHandshake(ip, port); tlsInfo != nil {
-		pi.Protocol = model.ProtoTLS
-		pi.TLS = tlsInfo
-		return true
-	}
-	return false
+	return true
 }
 
 func (d *Detect) tryHTTP(ctx context.Context, ip netip.Addr, port uint16, https bool, pi *model.PortInfo) bool {
-	info, _ := d.httpProbe(ctx, ip, port, https)
+	info := d.httpProbe(ctx, ip, port, https)
 	if info == nil {
 		return false
 	}
@@ -169,10 +168,9 @@ func (d *Detect) tryHTTP(ctx context.Context, ip netip.Addr, port uint16, https 
 	return true
 }
 
-// httpProbe does one GET (scheme per https) and returns the HTTP summary, plus a
-// TLS cert summary from the connection when https. Returns nil when the port
-// produced no HTTP response.
-func (d *Detect) httpProbe(ctx context.Context, ip netip.Addr, port uint16, https bool) (*model.HTTPInfo, *model.TLSInfo) {
+// httpProbe does one GET (scheme per https) and returns the HTTP summary, or nil
+// when the port produced no HTTP response.
+func (d *Detect) httpProbe(ctx context.Context, ip netip.Addr, port uint16, https bool) *model.HTTPInfo {
 	scheme := "http"
 	if https {
 		scheme = "https"
@@ -199,11 +197,11 @@ func (d *Detect) httpProbe(ctx context.Context, ip netip.Addr, port uint16, http
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil // no HTTP response
+		return nil // no HTTP response
 	}
 	defer resp.Body.Close()
 
@@ -212,12 +210,7 @@ func (d *Detect) httpProbe(ctx context.Context, ip netip.Addr, port uint16, http
 	info.Server = resp.Header.Get("Server")
 	info.Title = extractTitle(body)
 	info.Redirects = redirects
-
-	var tlsInfo *model.TLSInfo
-	if https && resp.TLS != nil {
-		tlsInfo = summarizeCert(resp.TLS)
-	}
-	return info, tlsInfo
+	return info
 }
 
 // tlsHandshake does a bare TLS handshake and returns a cert summary, or nil.
