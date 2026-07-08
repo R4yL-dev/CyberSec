@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# netscan — front-end for the netscan-go pipeline. Wraps the four binaries so a
+# full scan (discover -> ingest -> light enrichment) is a single command, and
+# exposes each binary as a subcommand for advanced use.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF")" && pwd)"
+BIN="$ROOT/bin"
+DEFAULT_DB="scan.db"
+
+die() { echo "netscan: $*" >&2; exit 1; }
+need() { [[ -x "$BIN/$1" ]] || die "$1 not built — run 'make build'"; }
+
+usage() {
+	cat >&2 <<'EOF'
+netscan — internet-scale port scanner (netscan-go)
+
+usage:
+  netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [ns-discover flags...]
+  netscan status [--db FILE] [--host IP] [--interval DUR]
+  netscan discover|ingest|enrich [flags...]     # pass through to the raw binary
+
+examples:
+  netscan scan --targets 1.1.1.0/24 --db scan.db
+  netscan scan --targets 1.1.1.0/24 --ports 80,443,8080 --syn
+  netscan status --db scan.db
+  netscan status --db scan.db --host 1.1.1.1
+
+notes:
+  'scan' runs a one-shot pipeline: discovery -> ingest -> light enrichment (--drain).
+  --syn uses stateless SYN discovery (needs 'make setcap') with a scoped, auto-removed
+  iptables RST guard; override its source port with SRC_PORT=NNN.
+EOF
+	exit 1
+}
+
+cmd_scan() {
+	local db="$DEFAULT_DB" syn=0 args=()
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			--db)   db="$2"; shift 2 ;;
+			--db=*) db="${1#*=}"; shift ;;
+			--syn)  syn=1; shift ;;
+			-h|--help) usage ;;
+			*)      args+=("$1"); shift ;;
+		esac
+	done
+	[[ ${#args[@]} -gt 0 ]] || die "scan needs at least --targets (see 'netscan --help')"
+	need ns-ingest
+	need ns-enrich
+
+	if [[ "$syn" == 1 ]]; then
+		# syn-scan.sh does the cap check + scoped iptables guard, and streams NDJSON.
+		"$ROOT/scripts/syn-scan.sh" "${args[@]}" | "$BIN/ns-ingest" --db "$db"
+	else
+		need ns-discover
+		"$BIN/ns-discover" "${args[@]}" | "$BIN/ns-ingest" --db "$db"
+	fi
+	"$BIN/ns-enrich" --db "$db" --stage light --drain
+	echo "netscan: done -> $db  (view: netscan status --db $db)" >&2
+}
+
+main() {
+	[[ $# -ge 1 ]] || usage
+	local cmd="$1"; shift
+	case "$cmd" in
+		scan)          cmd_scan "$@" ;;
+		status)        need ns-status;   exec "$BIN/ns-status" "$@" ;;
+		discover)      need ns-discover; exec "$BIN/ns-discover" "$@" ;;
+		ingest)        need ns-ingest;   exec "$BIN/ns-ingest" "$@" ;;
+		enrich)        need ns-enrich;   exec "$BIN/ns-enrich" "$@" ;;
+		-h|--help|help) usage ;;
+		*)             die "unknown command '$cmd' (see 'netscan --help')" ;;
+	esac
+}
+
+main "$@"
