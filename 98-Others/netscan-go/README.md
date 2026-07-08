@@ -341,7 +341,9 @@ light ──RespondedHTTP──▶ webinfo
 
 - **`light`** (entry): cheap HTTP probe per open port — `GET` (≤10 redirects, ≤64 KiB body) →
   status, `Server`, redirect chain, `<title>`; plus a TLS cert summary on 443 (version, CN, SANs,
-  issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust.
+  issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust. As the triage
+  palier it uses a **bounded 5s timeout** (independent of `--timeout`) and records **no HTTP block
+  when the port isn't HTTP** (e.g. SSH) — that routes the port to `banner`.
 - **`webinfo`** (gated on an HTTP response): one richer fetch → all headers, cookies, detected
   technologies, security headers, a Shodan-style favicon hash, and **normalized services** —
   product+version parsed from `Server` / `X-Powered-By` / `<meta generator>`, with a **CPE**
