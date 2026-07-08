@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -18,10 +19,11 @@ import (
 // privileges, so it is the default backend and the correctness reference for
 // the SYN prober.
 type ConnectProber struct {
-	Ports   []uint16
-	Workers int
-	Timeout time.Duration
-	Limiter *rate.Limiter // optional throttle; nil means unthrottled
+	Ports    []uint16
+	Workers  int
+	Timeout  time.Duration
+	Limiter  *rate.Limiter // optional throttle; nil means unthrottled
+	Progress *int64        // optional: incremented once per host actually probed
 }
 
 // Run fans addresses out to a worker pool; each worker probes every port of a
@@ -40,6 +42,9 @@ func (p *ConnectProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out
 			defer wg.Done()
 			for addr := range addrCh {
 				open := p.scanHost(ctx, addr)
+				if p.Progress != nil {
+					atomic.AddInt64(p.Progress, 1)
+				}
 				if len(open) == 0 {
 					continue
 				}
