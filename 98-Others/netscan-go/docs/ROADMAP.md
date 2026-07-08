@@ -108,7 +108,16 @@ embedded as the built-in default), resolved against name registries (enrichers +
 selectors** `always`/`is_web`/`has_tls`; no expression DSL yet). `ns-enrich --pipeline <file>` /
 `--print-pipeline`, `netscan scan --pipeline` forward it; entry stays `detect`; `Load` validates.
 
-**Remaining:** `recheck`, and a selector **expression DSL** if named selectors ever fall short.
+**Deep per-host port scan** ✅ done — the `portscan` palier (`internal/enrich/portscan.go`,
+connect, bounded concurrency) sweeps a host's ports (`--ports-deep`: common set / spec / `all`),
+unions newly-found ports, and re-enters `detect` to classify+enrich them (the re-entrant
+"backward" edge, guarded by `needs_portscan` to run once). Opt-in via `profiles/deep.yaml`.
+Required: `HostRecord.Merge` + `store.Complete` now union/persist `open_ports`. Per-palier config
+flows via `pipeline.Options` (typed, from flags — not YAML). `ns-discover --top-ports N` for the
+common-first discovery phase.
+
+**Remaining:** `recheck`, a selector **expression DSL** if named selectors fall short, and a
+**SYN-based** deep scan (would need raw sockets in ns-enrich; connect is the v1 path).
 
 ## CVE chain (the end goal — sort/filter hosts by CVE)
 
