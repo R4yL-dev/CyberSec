@@ -38,7 +38,7 @@ type SYNProber struct {
 	Retries  int
 	Grace    time.Duration
 	Limiter  *rate.Limiter // optional throttle
-	Progress *int64        // optional: incremented once per address sent (per pass)
+	Progress *int64        // optional: incremented once per SYN sent (probe)
 
 	secret  uint32
 	srcPort uint16
@@ -175,9 +175,6 @@ func (p *SYNProber) send(ctx context.Context, fd int, src4 [4]byte, addrs iter.S
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if p.Progress != nil {
-				atomic.AddInt64(p.Progress, 1)
-			}
 			dst4 := addr.As4()
 			for _, port := range p.Ports {
 				pkt, err := p.craft(src4, dst4, port)
@@ -188,6 +185,9 @@ func (p *SYNProber) send(ctx context.Context, fd int, src4 [4]byte, addrs iter.S
 					if err := p.Limiter.Wait(ctx); err != nil {
 						return err
 					}
+				}
+				if p.Progress != nil {
+					atomic.AddInt64(p.Progress, 1) // count probes (SYNs), so rate matches --rate
 				}
 				_ = syscall.Sendto(fd, pkt, 0, &syscall.SockaddrInet4{Addr: dst4})
 			}

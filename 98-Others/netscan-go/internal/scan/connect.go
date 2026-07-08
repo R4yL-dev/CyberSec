@@ -23,7 +23,7 @@ type ConnectProber struct {
 	Workers  int
 	Timeout  time.Duration
 	Limiter  *rate.Limiter // optional throttle; nil means unthrottled
-	Progress *int64        // optional: incremented once per host actually probed
+	Progress *int64        // optional: incremented once per probe (dial)
 }
 
 // Run fans addresses out to a worker pool; each worker probes every port of a
@@ -100,12 +100,16 @@ func (p *ConnectProber) scanHost(ctx context.Context, addr netip.Addr) []uint16 
 	return open
 }
 
-// waitDial applies the rate limit then dials one port, reporting whether it is open.
+// waitDial applies the rate limit then dials one port, reporting whether it is
+// open. Progress counts probes (dials), so its rate matches --rate.
 func (p *ConnectProber) waitDial(ctx context.Context, addr netip.Addr, port uint16) bool {
 	if p.Limiter != nil {
 		if err := p.Limiter.Wait(ctx); err != nil {
 			return false
 		}
+	}
+	if p.Progress != nil {
+		atomic.AddInt64(p.Progress, 1)
 	}
 	return p.dial(ctx, addr, port)
 }
