@@ -328,6 +328,7 @@ Built-in graph:
 
 ```
 light ──RespondedHTTP──▶ webinfo
+      ──HasTLS─────────▶ tls-deep
       ──Always─────────▶ ptr
 ```
 
@@ -336,6 +337,8 @@ light ──RespondedHTTP──▶ webinfo
   issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust.
 - **`webinfo`** (gated on an HTTP response): one richer fetch → all headers, cookies, detected
   technologies, security headers, and a Shodan-style favicon hash.
+- **`tls-deep`** (gated on TLS): supported TLS versions + negotiated cipher per version, full cert
+  chain, weak-crypto warnings, and a **JARM** active fingerprint (~15 handshakes, hence gated).
 - **`ptr`** (always): reverse DNS.
 
 Concurrent paliers on the same host can't clobber each other: `store.Complete` re-reads and
