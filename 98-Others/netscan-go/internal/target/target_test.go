@@ -170,6 +170,59 @@ func TestSeedReproducible(t *testing.T) {
 	}
 }
 
+func TestRandomizedFromResumes(t *testing.T) {
+	// With reserved-skipping off, position == yielded index, so RandomizedFrom
+	// at position k must equal the tail of Randomized from k onward.
+	s, err := NewSpace([]string{"1.2.0.0/24"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var full []netip.Addr
+	for a := range s.Randomized(7) {
+		full = append(full, a)
+	}
+	const k = 100
+	var tail []netip.Addr
+	var pos uint64
+	for a := range s.RandomizedFrom(7, k, &pos) {
+		tail = append(tail, a)
+	}
+	if len(tail) != len(full)-k {
+		t.Fatalf("tail length %d, want %d", len(tail), len(full)-k)
+	}
+	for i := range tail {
+		if tail[i] != full[k+i] {
+			t.Fatalf("resume mismatch at %d: %v vs %v", i, tail[i], full[k+i])
+		}
+	}
+	if pos != s.Total()-1 {
+		t.Fatalf("final pos = %d, want %d", pos, s.Total()-1)
+	}
+}
+
+func TestSignatureStableAndDistinct(t *testing.T) {
+	mk := func(targets, excl []string, skip bool) string {
+		s, err := NewSpace(targets, excl, skip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Signature()
+	}
+	base := mk([]string{"1.2.0.0/24"}, nil, true)
+	if base != mk([]string{"1.2.0.0/24"}, nil, true) {
+		t.Fatal("signature not stable across identical spaces")
+	}
+	if base == mk([]string{"1.3.0.0/24"}, nil, true) {
+		t.Fatal("different targets produced the same signature")
+	}
+	if base == mk([]string{"1.2.0.0/24"}, []string{"1.2.0.0/28"}, true) {
+		t.Fatal("different excludes produced the same signature")
+	}
+	if base == mk([]string{"1.2.0.0/24"}, nil, false) {
+		t.Fatal("different skip-reserved produced the same signature")
+	}
+}
+
 func TestIPv6Rejected(t *testing.T) {
 	if _, err := NewSpace([]string{"2001:db8::/32"}, nil, true); err == nil {
 		t.Fatal("expected IPv6 target to be rejected")
