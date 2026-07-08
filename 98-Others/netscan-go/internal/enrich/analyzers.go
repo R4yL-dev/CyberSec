@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -113,11 +115,11 @@ func detectTech(headers map[string]string, cookies []string, body []byte) []stri
 	for name := range found {
 		out = append(out, name)
 	}
-	sortStrings(out)
+	sort.Strings(out)
 	return out
 }
 
-var generatorRe = regexpMustCompile(`(?is)<meta[^>]+name=["']?generator["']?[^>]+content=["']([^"']+)["']`)
+var generatorRe = regexp.MustCompile(`(?is)<meta[^>]+name=["']?generator["']?[^>]+content=["']([^"']+)["']`)
 
 func metaGenerator(body string) string {
 	m := generatorRe.FindStringSubmatch(body)
