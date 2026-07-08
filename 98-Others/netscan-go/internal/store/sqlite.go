@@ -251,24 +251,35 @@ func unmarshalJSON(s string, v any) {
 }
 
 func (s *SQLite) Complete(ctx context.Context, id int64, host *model.HostRecord) error {
-	data, err := json.Marshal(host.Ports)
-	if err != nil {
-		return err
-	}
-	status, err := json.Marshal(host.Status)
-	if err != nil {
-		return err
-	}
-
 	tx, err := s.w.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	// Re-read the current enrichment under the write lock and merge into it, so
+	// paliers that ran concurrently on the same host don't clobber each other.
+	cur := &model.HostRecord{IP: host.IP}
+	var dataJSON, statusJSON, ptrJSON string
+	switch err := tx.QueryRowContext(ctx, `SELECT data, status, ptr FROM hosts WHERE ip=?`,
+		host.IP.String()).Scan(&dataJSON, &statusJSON, &ptrJSON); err {
+	case nil:
+		unmarshalJSON(dataJSON, &cur.Ports)
+		unmarshalJSON(statusJSON, &cur.Status)
+		unmarshalJSON(ptrJSON, &cur.PTR)
+	case sql.ErrNoRows:
+		// no row yet (shouldn't happen post-ingest); merge into an empty record
+	default:
+		return err
+	}
+	cur.Merge(host)
+
+	data, _ := json.Marshal(cur.Ports)
+	status, _ := json.Marshal(cur.Status)
+	ptr, _ := json.Marshal(cur.PTR)
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE hosts SET data=?, status=?, attempts=?, last_seen=? WHERE ip=?`,
-		string(data), string(status), host.Attempts, nowMS(), host.IP.String()); err != nil {
+		UPDATE hosts SET data=?, status=?, ptr=?, attempts=?, last_seen=? WHERE ip=?`,
+		string(data), string(status), string(ptr), cur.Attempts, nowMS(), host.IP.String()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
