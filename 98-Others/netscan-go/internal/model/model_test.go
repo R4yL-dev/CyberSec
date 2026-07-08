@@ -12,7 +12,7 @@ func TestMergeNoClobber(t *testing.T) {
 		return &HostRecord{
 			IP: netip.MustParseAddr("1.1.1.1"),
 			Ports: map[uint16]*PortInfo{
-				443: {Port: 443, HTTP: &HTTPInfo{Status: 200}, TLS: &TLSInfo{Version: "TLS 1.3"}},
+				443: {Port: 443, Protocol: ProtoHTTPS, HTTP: &HTTPInfo{Status: 200}, TLS: &TLSInfo{Version: "TLS 1.3"}},
 			},
 			Status: map[string]string{"light": "ok"},
 		}
@@ -48,7 +48,10 @@ func TestMergeNoClobber(t *testing.T) {
 			t.Fatal("services lost")
 		}
 		if cur.Ports[443].HTTP == nil || cur.Ports[443].TLS == nil {
-			t.Fatal("light HTTP/TLS lost")
+			t.Fatal("HTTP/TLS lost")
+		}
+		if cur.Ports[443].Protocol != ProtoHTTPS {
+			t.Fatalf("protocol lost: %q", cur.Ports[443].Protocol)
 		}
 		if len(cur.PTR) != 1 || cur.PTR[0] != "one.one.one.one" {
 			t.Fatal("ptr lost")

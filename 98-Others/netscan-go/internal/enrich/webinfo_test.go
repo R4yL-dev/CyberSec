@@ -43,7 +43,7 @@ func TestLightThenWebinfo(t *testing.T) {
 	}
 
 	// detect
-	if err := NewDetect(2 * time.Second).Enrich(ctx, host); err != nil {
+	if err := NewDetect(2*time.Second).Enrich(ctx, host); err != nil {
 		t.Fatal(err)
 	}
 	pi := host.Ports[ap.Port()]

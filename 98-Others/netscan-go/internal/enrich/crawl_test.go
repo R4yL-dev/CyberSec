@@ -38,7 +38,7 @@ func TestCrawl(t *testing.T) {
 		IP:        ap.Addr(),
 		OpenPorts: []uint16{ap.Port()},
 		Ports: map[uint16]*model.PortInfo{
-			ap.Port(): {Port: ap.Port(), HTTP: &model.HTTPInfo{Status: 200}},
+			ap.Port(): {Port: ap.Port(), Protocol: model.ProtoHTTP, HTTP: &model.HTTPInfo{Status: 200}},
 		},
 	}
 
