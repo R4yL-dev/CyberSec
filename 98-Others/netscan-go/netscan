@@ -18,7 +18,7 @@ usage() {
 netscan — internet-scale port scanner (netscan-go)
 
 usage:
-  netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [ns-discover flags...]
+  netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [--geoip F --asn F] [ns-discover flags...]
   netscan status [--db FILE] [--host IP] [--interval DUR]
   netscan discover|ingest|enrich [flags...]     # pass through to the raw binary
   netscan iptables-clean                        # remove leftover SYN RST guards
@@ -38,12 +38,14 @@ EOF
 }
 
 cmd_scan() {
-	local db="$DEFAULT_DB" syn=0 args=()
+	local db="$DEFAULT_DB" syn=0 args=() geo_flags=() geo_set=0
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			--db)   db="$2"; shift 2 ;;
 			--db=*) db="${1#*=}"; shift ;;
 			--syn)  syn=1; shift ;;
+			--geoip|--asn) geo_flags+=("$1" "$2"); geo_set=1; shift 2 ;;
+			--geoip=*|--asn=*) geo_flags+=("$1"); geo_set=1; shift ;;
 			-h|--help) usage ;;
 			*)      args+=("$1"); shift ;;
 		esac
@@ -52,6 +54,13 @@ cmd_scan() {
 	need ns-discover
 	need ns-ingest
 	need ns-enrich
+
+	# Geo is default-on when the DBs exist under the repo's data/ (make geoip).
+	# Resolve against $ROOT so it works even when netscan is on PATH.
+	if [[ $geo_set -eq 0 ]]; then
+		[[ -f "$ROOT/data/dbip-country.mmdb" ]] && geo_flags+=(--geoip "$ROOT/data/dbip-country.mmdb")
+		[[ -f "$ROOT/data/dbip-asn.mmdb" ]] && geo_flags+=(--asn "$ROOT/data/dbip-asn.mmdb")
+	fi
 
 	# Enrichment runs concurrently with discovery: it drains the queue live and
 	# exits on its own once ingestion signals completion (store meta flag).
@@ -63,9 +72,9 @@ cmd_scan() {
 	local rc=0
 	if [[ "$syn" == 1 ]]; then
 		# syn-scan.sh does the cap check + scoped iptables guard, and streams NDJSON.
-		"$ROOT/scripts/syn-scan.sh" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" || rc=$?
+		"$ROOT/scripts/syn-scan.sh" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" "${geo_flags[@]}" || rc=$?
 	else
-		"$BIN/ns-discover" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" || rc=$?
+		"$BIN/ns-discover" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" "${geo_flags[@]}" || rc=$?
 	fi
 
 	# On success ingest marked "done" so the follower exits itself; on failure it
