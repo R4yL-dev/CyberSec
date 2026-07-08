@@ -42,19 +42,19 @@ func TestLightThenWebinfo(t *testing.T) {
 		Ports:     map[uint16]*model.PortInfo{},
 	}
 
-	// light
-	if err := NewLight(2*time.Second).Enrich(ctx, host); err != nil {
+	// detect
+	if err := NewDetect(2 * time.Second).Enrich(ctx, host); err != nil {
 		t.Fatal(err)
 	}
 	pi := host.Ports[ap.Port()]
-	if pi == nil || pi.HTTP == nil || pi.HTTP.Status != 200 {
-		t.Fatalf("light HTTP = %+v", pi)
+	if pi == nil || pi.Protocol != model.ProtoHTTP || pi.HTTP == nil || pi.HTTP.Status != 200 {
+		t.Fatalf("detect = %+v", pi)
 	}
 	if pi.HTTP.Server != "nginx/1.25" || pi.HTTP.Title != "Hello" {
-		t.Fatalf("light server=%q title=%q", pi.HTTP.Server, pi.HTTP.Title)
+		t.Fatalf("detect server=%q title=%q", pi.HTTP.Server, pi.HTTP.Title)
 	}
 
-	// webinfo (gated in the pipeline by RespondedHTTP, which light now satisfies)
+	// webinfo (gated in the pipeline by IsWeb, which detect now satisfies)
 	if err := NewWebinfo(2*time.Second).Enrich(ctx, host); err != nil {
 		t.Fatal(err)
 	}

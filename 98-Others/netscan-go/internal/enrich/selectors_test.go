@@ -15,30 +15,24 @@ func hostWith(pi *model.PortInfo) *model.HostRecord {
 }
 
 func TestSelectors(t *testing.T) {
-	http200 := hostWith(&model.PortInfo{Port: 80, HTTP: &model.HTTPInfo{Status: 200}})
-	http500 := hostWith(&model.PortInfo{Port: 80, HTTP: &model.HTTPInfo{Status: 500}})
-	noResp := hostWith(&model.PortInfo{Port: 80, HTTP: &model.HTTPInfo{Status: 0}})
-	tlsHost := hostWith(&model.PortInfo{Port: 443, TLS: &model.TLSInfo{Version: "TLS 1.3"}})
+	http := hostWith(&model.PortInfo{Port: 80, Protocol: model.ProtoHTTP})
+	https := hostWith(&model.PortInfo{Port: 443, Protocol: model.ProtoHTTPS, TLS: &model.TLSInfo{Version: "TLS 1.3"}})
+	tlsOnly := hostWith(&model.PortInfo{Port: 8443, Protocol: model.ProtoTLS, TLS: &model.TLSInfo{Version: "TLS 1.2"}})
+	ssh := hostWith(&model.PortInfo{Port: 22, Protocol: model.ProtoSSH})
 
-	if !Always(noResp) {
+	if !Always(ssh) {
 		t.Fatal("Always must always pass")
 	}
-	if !RespondedHTTP(http200) || !RespondedHTTP(http500) {
-		t.Fatal("RespondedHTTP must pass for any non-zero status")
+	if !IsWeb(http) || !IsWeb(https) {
+		t.Fatal("IsWeb must pass for http and https")
 	}
-	if RespondedHTTP(noResp) {
-		t.Fatal("RespondedHTTP must fail for status 0")
+	if IsWeb(ssh) || IsWeb(tlsOnly) {
+		t.Fatal("IsWeb must fail for non-web protocols")
 	}
-	if !StatusOK(http200) {
-		t.Fatal("StatusOK must pass for 200")
+	if !HasTLS(https) || !HasTLS(tlsOnly) {
+		t.Fatal("HasTLS must pass whenever a cert summary is present (any port)")
 	}
-	if StatusOK(http500) {
-		t.Fatal("StatusOK must fail for 500")
-	}
-	if !HasTLS(tlsHost) {
-		t.Fatal("HasTLS must pass with a TLS version")
-	}
-	if HasTLS(http200) {
+	if HasTLS(http) || HasTLS(ssh) {
 		t.Fatal("HasTLS must fail without TLS")
 	}
 }

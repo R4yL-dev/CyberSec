@@ -1,14 +1,6 @@
 package enrich
 
-import (
-	"context"
-	"net"
-	"net/netip"
-	"testing"
-	"time"
-
-	"netscan/internal/model"
-)
+import "testing"
 
 func TestParseBanner(t *testing.T) {
 	cases := []struct {
@@ -37,46 +29,5 @@ func TestSanitizeBanner(t *testing.T) {
 	got := sanitizeBanner([]byte("SSH-2.0-OpenSSH_9.6\r\nextra line"))
 	if got != "SSH-2.0-OpenSSH_9.6" {
 		t.Fatalf("sanitize = %q", got)
-	}
-}
-
-// TestBannerGrab exercises the connect+read path against a local TCP server that
-// speaks first (like SSH/FTP/SMTP).
-func TestBannerGrab(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		_, _ = c.Write([]byte("SSH-2.0-OpenSSH_9.6p1 Debian-4\r\n"))
-		c.Close()
-	}()
-
-	ap := netip.MustParseAddrPort(ln.Addr().String())
-	host := &model.HostRecord{
-		IP:        ap.Addr(),
-		OpenPorts: []uint16{ap.Port()},
-		Ports: map[uint16]*model.PortInfo{
-			// light saw no HTTP here (status 0) → banner palier handles it.
-			ap.Port(): {Port: ap.Port(), HTTP: &model.HTTPInfo{Status: 0}},
-		},
-	}
-	if err := NewBanner(2*time.Second).Enrich(context.Background(), host); err != nil {
-		t.Fatal(err)
-	}
-	pi := host.Ports[ap.Port()]
-	if pi.Banner == "" {
-		t.Fatal("no raw banner captured")
-	}
-	if len(pi.Services) != 1 || pi.Services[0].Product != "openssh" || pi.Services[0].Source != "banner" {
-		t.Fatalf("services = %+v", pi.Services)
-	}
-	if pi.Services[0].Version != "9.6p1" {
-		t.Fatalf("version = %q", pi.Services[0].Version)
 	}
 }
