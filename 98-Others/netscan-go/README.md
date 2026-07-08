@@ -246,6 +246,7 @@ guard with `netscan iptables-clean`.
 | `--src-port`         | `0`        | SYN source port (`0` = random; pin to scope the iptables rule). |
 | `--db`               | —          | Optional SQLite DB for progress/checkpoint reporting (for `ns-status`; never touches the work queue). |
 | `--resume`           | `false`    | Resume from the last checkpoint in `--db` (same targets/seed).       |
+| `--progress`         | `false`    | Live progress line on stderr (`\r`-updated on a TTY, periodic lines otherwise). |
 | `--yes`              | `false`    | Confirm scans larger than 65536 addresses, or `--rate 0`.  |
 
 **Resuming an interrupted scan.** With `--db`, discovery checkpoints its position every second.
