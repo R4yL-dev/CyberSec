@@ -34,7 +34,10 @@ added=0
 KEEPALIVE_PID=""
 
 cleanup() {
-  [[ -n "$KEEPALIVE_PID" ]] && kill "$KEEPALIVE_PID" 2>/dev/null || true
+  if [[ -n "$KEEPALIVE_PID" ]]; then
+    pkill -P "$KEEPALIVE_PID" 2>/dev/null || true # the inner sleep child
+    kill "$KEEPALIVE_PID" 2>/dev/null || true
+  fi
   [[ "$added" == 1 ]] || return 0
   # Remove every copy of our rule (guards against accidental accumulation).
   while sudo iptables -C "${RULE[@]}" 2>/dev/null; do
@@ -52,8 +55,11 @@ trap cleanup EXIT INT TERM
 
 # Authenticate once, then keep the sudo timestamp fresh for the whole (possibly
 # long) scan so the cleanup -D at the end never re-prompts for a password.
+# stdout/stderr are redirected so this background job does NOT inherit the
+# NDJSON pipe — otherwise its `sleep` would hold the pipe open and downstream
+# (ns-ingest) would never see EOF.
 sudo -v
-( while true; do sleep 50; sudo -n -v 2>/dev/null || exit; done ) &
+( while true; do sleep 50; sudo -n -v 2>/dev/null || exit; done ) >/dev/null 2>&1 &
 KEEPALIVE_PID=$!
 
 if ! sudo iptables -C "${RULE[@]}" 2>/dev/null; then
