@@ -41,21 +41,30 @@ func (p Pipeline) Stages() []string {
 	return out
 }
 
+// Options carries per-build configuration passed to enricher constructors
+// (kept out of the YAML: typed and supplied via CLI flags).
+type Options struct {
+	Timeout   time.Duration
+	DeepPorts []uint16 // for the portscan palier
+}
+
 // enrichers maps a stage/enricher name to its constructor. The map key is both
 // the work-queue stage name and the enricher type.
-var enrichers = map[string]func(time.Duration) enrich.Enricher{
-	model.StageDetect:  func(t time.Duration) enrich.Enricher { return enrich.NewDetect(t) },
-	model.StageWebinfo: func(t time.Duration) enrich.Enricher { return enrich.NewWebinfo(t) },
-	model.StageCrawl:   func(t time.Duration) enrich.Enricher { return enrich.NewCrawl(t) },
-	model.StageTLSDeep: func(t time.Duration) enrich.Enricher { return enrich.NewTLSDeep(t) },
-	model.StagePTR:     func(time.Duration) enrich.Enricher { return enrich.NewPTR() },
+var enrichers = map[string]func(Options) enrich.Enricher{
+	model.StageDetect:   func(o Options) enrich.Enricher { return enrich.NewDetect(o.Timeout) },
+	model.StageWebinfo:  func(o Options) enrich.Enricher { return enrich.NewWebinfo(o.Timeout) },
+	model.StageCrawl:    func(o Options) enrich.Enricher { return enrich.NewCrawl(o.Timeout) },
+	model.StageTLSDeep:  func(o Options) enrich.Enricher { return enrich.NewTLSDeep(o.Timeout) },
+	model.StagePTR:      func(Options) enrich.Enricher { return enrich.NewPTR() },
+	model.StagePortscan: func(o Options) enrich.Enricher { return enrich.NewPortscan(o.DeepPorts, o.Timeout) },
 }
 
 // selectors maps a config `when:` name to its predicate. Empty/absent = always.
 var selectors = map[string]enrich.Selector{
-	"always":  enrich.Always,
-	"is_web":  enrich.IsWeb,
-	"has_tls": enrich.HasTLS,
+	"always":         enrich.Always,
+	"is_web":         enrich.IsWeb,
+	"has_tls":        enrich.HasTLS,
+	"needs_portscan": enrich.NeedsPortscan,
 }
 
 // Config is the YAML shape of a pipeline.
@@ -76,8 +85,8 @@ type EdgeConfig struct {
 var defaultYAML []byte
 
 // Default is the built-in pipeline (parsed from the embedded default.yaml).
-func Default(timeout time.Duration) Pipeline {
-	pl, err := Load(defaultYAML, timeout)
+func Default(opts Options) Pipeline {
+	pl, err := Load(defaultYAML, opts)
 	if err != nil {
 		panic("pipeline: embedded default.yaml is invalid: " + err.Error()) // build-time guarantee
 	}
@@ -88,17 +97,17 @@ func Default(timeout time.Duration) Pipeline {
 func DefaultYAML() []byte { return defaultYAML }
 
 // LoadFile reads and builds a pipeline from a YAML file.
-func LoadFile(path string, timeout time.Duration) (Pipeline, error) {
+func LoadFile(path string, opts Options) (Pipeline, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return Load(data, timeout)
+	return Load(data, opts)
 }
 
 // Load parses a YAML config, resolves enricher/selector names via the registries,
 // and validates the graph.
-func Load(data []byte, timeout time.Duration) (Pipeline, error) {
+func Load(data []byte, opts Options) (Pipeline, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
