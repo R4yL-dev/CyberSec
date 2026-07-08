@@ -8,8 +8,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
-	"sort"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -32,8 +30,9 @@ import (
 // works (pcap already saw the reply), but to avoid sending those stray RSTs run
 // with an iptables rule dropping outbound RSTs from the scan source port.
 //
-// v1 buffers responding hosts and emits them after a grace period rather than
-// streaming — the responding set is a tiny fraction of the address space.
+// Responding hosts are streamed as their SYN-ACKs arrive (one record per open
+// port, deduplicated); the send continues for a grace period afterward to catch
+// late replies. Streaming lets enrichment overlap discovery.
 type SYNProber struct {
 	Ports    []uint16
 	Retries  int
