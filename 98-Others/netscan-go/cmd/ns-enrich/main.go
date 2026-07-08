@@ -35,12 +35,22 @@ func main() {
 	backoff := flag.Duration("backoff", 5*time.Second, "base retry backoff")
 	drain := flag.Bool("drain", false, "exit once the queue is empty instead of polling")
 	follow := flag.Bool("follow", false, "keep draining until ingestion is done, then exit")
+	pipelinePath := flag.String("pipeline", "", "YAML pipeline config (default: built-in graph)")
+	printPipeline := flag.Bool("print-pipeline", "", "print the default pipeline YAML and exit")
 	flag.Parse()
+
+	if *printPipeline {
+		os.Stdout.Write(pipeline.DefaultYAML())
+		return
+	}
 	if *dbPath == "" {
 		fatal("--db is required")
 	}
 
-	pl := pipeline.Default(*timeout)
+	pl, err := loadPipeline(*pipelinePath, *timeout)
+	if err != nil {
+		fatal("%v", err)
+	}
 	stages := pl.Stages()
 	if *stageFlag != "" {
 		stages = nil

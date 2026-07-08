@@ -1,0 +1,17 @@
+# Default enrichment pipeline.
+#
+# The entry stage is always "detect" (ns-ingest enqueues it). Each stage lists
+# gated edges to the next stages; `when` is a named selector (always | is_web |
+# has_tls). Edit this (via `ns-enrich --print-pipeline > my.yaml`) to build scan
+# profiles, then run `ns-enrich --pipeline my.yaml` (or `netscan scan --pipeline`).
+stages:
+  detect:
+    next:
+      - {to: webinfo,  when: is_web}
+      - {to: crawl,    when: is_web}
+      - {to: tls-deep, when: has_tls}
+      - {to: ptr,      when: always}
+  webinfo: {}
+  crawl: {}
+  tls-deep: {}
+  ptr: {}
