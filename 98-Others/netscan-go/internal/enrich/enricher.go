@@ -1,6 +1,6 @@
-// Package enrich holds the domain-B paliers. An Enricher augments a host record
-// in place; v1 ships only Light. Heavier paliers (and a targeted "recheck")
-// implement the same interface and are chosen by stage name.
+// Package enrich holds the domain-B enrichment modules. An Enricher augments a
+// host record in place; each is one palier (a work-queue stage). Paliers are
+// composed into a graph by internal/pipeline and gated by Selectors.
 package enrich
 
 import (
@@ -19,7 +19,7 @@ type Enricher interface {
 	Enrich(ctx context.Context, host *model.HostRecord) error
 }
 
-// Selector decides whether a host advances to a given palier. v1 has a single
-// palier and gates nothing; multi-palier setups will attach a Selector per
-// stage (e.g. only 200-OK hosts advance to the heavy palier).
+// Selector decides whether a host advances along a pipeline edge to the next
+// palier (e.g. only hosts that answered HTTP advance to webinfo). Built-in
+// predicates live in selectors.go.
 type Selector func(*model.HostRecord) bool

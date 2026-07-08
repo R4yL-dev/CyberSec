@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// Stage names for the domain-B work queue. v1 ships only the light palier;
-// heavier paliers (and a targeted "recheck") plug in later without changing
-// the queue or the store.
+// Stage names for the domain-B work queue — one per enrichment palier. New
+// paliers add a constant here and an entry in internal/pipeline.
 const (
 	StageLight   = "light"   // cheap HTTP probe + TLS summary (entry palier)
 	StageWebinfo = "webinfo" // richer HTTP fetch + analyzers (tech, headers, favicon)
