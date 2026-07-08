@@ -48,18 +48,32 @@ cmd_scan() {
 		esac
 	done
 	[[ ${#args[@]} -gt 0 ]] || die "scan needs at least --targets (see 'netscan --help')"
+	need ns-discover
 	need ns-ingest
 	need ns-enrich
 
+	# Enrichment runs concurrently with discovery: it drains the queue live and
+	# exits on its own once ingestion signals completion (store meta flag). The
+	# EXIT trap reaps it on any failure/interrupt path.
+	"$BIN/ns-enrich" --db "$db" --stage light --follow &
+	local epid=$!
+	trap 'kill "$epid" 2>/dev/null || true' EXIT INT TERM
+
+	echo "netscan: live view -> netscan status --db $db --interval 2s" >&2
+
+	local rc=0
 	if [[ "$syn" == 1 ]]; then
 		# syn-scan.sh does the cap check + scoped iptables guard, and streams NDJSON.
-		"$ROOT/scripts/syn-scan.sh" "${args[@]}" | "$BIN/ns-ingest" --db "$db"
+		"$ROOT/scripts/syn-scan.sh" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" || rc=$?
 	else
-		need ns-discover
-		"$BIN/ns-discover" "${args[@]}" | "$BIN/ns-ingest" --db "$db"
+		"$BIN/ns-discover" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" || rc=$?
 	fi
-	"$BIN/ns-enrich" --db "$db" --stage light --drain
+
+	if [[ $rc -eq 0 ]]; then
+		wait "$epid" 2>/dev/null || true   # enrich drains remaining work, then exits
+	fi
 	echo "netscan: done -> $db  (view: netscan status --db $db)" >&2
+	return $rc
 }
 
 main() {
