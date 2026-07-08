@@ -337,7 +337,9 @@ func rewindPos(pos uint64, mode string, workers int) uint64 {
 	if workers < 1 {
 		workers = 1
 	}
-	margin := uint64(workers)*4 + (1 << 14) // feed buffer + workers + slack
+	// The connect feed leads probing by at most the addrCh buffer (workers*2)
+	// plus in-flight workers = workers*3; workers*4 covers that with slack.
+	margin := uint64(workers) * 4
 	if pos > margin {
 		return pos - margin
 	}
