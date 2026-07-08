@@ -33,7 +33,7 @@ func (w *Webinfo) Enrich(ctx context.Context, host *model.HostRecord) error {
 		if pi == nil || pi.HTTP == nil || pi.HTTP.Status == 0 {
 			continue // light saw no HTTP response on this port
 		}
-		pi.Web = w.analyze(ctx, host.IP, port)
+		pi.Web, pi.Services = w.analyze(ctx, host.IP, port)
 	}
 	if host.Status == nil {
 		host.Status = make(map[string]string, 1)
@@ -52,7 +52,7 @@ func (w *Webinfo) client() *http.Client {
 	}
 }
 
-func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16) *model.WebInfo {
+func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16) (*model.WebInfo, []model.Service) {
 	scheme := "http"
 	if tlsPorts[port] {
 		scheme = "https"
@@ -64,12 +64,12 @@ func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16) *mode
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/", nil)
 	if err != nil {
 		info.Error = err.Error()
-		return info
+		return info, nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		info.Error = err.Error()
-		return info
+		return info, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, w.MaxBody))
 	cookies := resp.Cookies()
@@ -80,7 +80,7 @@ func (w *Webinfo) analyze(ctx context.Context, ip netip.Addr, port uint16) *mode
 	info.SecurityHeaders = securityHeaders(info.Headers)
 	info.Technologies = detectTech(info.Headers, info.Cookies, body)
 	info.FaviconHash = w.favicon(ctx, client, base)
-	return info
+	return info, extractServices(info.Headers, body)
 }
 
 // favicon fetches /favicon.ico (a separate URL, so its own request) and returns
