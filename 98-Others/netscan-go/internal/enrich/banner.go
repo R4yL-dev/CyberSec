@@ -1,78 +1,15 @@
 package enrich
 
 import (
-	"context"
-	"net"
-	"net/netip"
 	"regexp"
 	"strings"
-	"time"
 	"unicode"
 
 	"netscan/internal/model"
 )
 
-// Banner is a non-web service palier: it grabs the banner that server-speaks-
-// first services (SSH, FTP, SMTP, POP3, IMAP, MySQL…) send on connect, stores it
-// raw (truncated), and parses a product+version Service from it. It runs after
-// light on ports that produced no HTTP response (the non-web ports).
-type Banner struct {
-	Timeout time.Duration
-	MaxRead int
-}
-
-func NewBanner(timeout time.Duration) *Banner {
-	return &Banner{Timeout: timeout, MaxRead: 1024}
-}
-
-func (b *Banner) Stage() string { return model.StageBanner }
-
-func (b *Banner) Enrich(ctx context.Context, host *model.HostRecord) error {
-	for _, port := range host.OpenPorts {
-		if ctx.Err() != nil {
-			break
-		}
-		pi := host.Ports[port]
-		if pi != nil && pi.HTTP != nil && pi.HTTP.Status != 0 {
-			continue // this is a web port; light already handled it
-		}
-		if pi == nil {
-			pi = &model.PortInfo{Port: port}
-			host.Ports[port] = pi
-		}
-		raw := b.grab(ctx, host.IP, port)
-		if raw == "" {
-			continue
-		}
-		pi.Banner = raw
-		if svc := parseBanner(raw); svc != nil {
-			svc.Source = "banner"
-			pi.Services = append(pi.Services, *svc)
-		}
-	}
-	if host.Status == nil {
-		host.Status = make(map[string]string, 1)
-	}
-	host.Status[model.StageBanner] = "ok"
-	return nil
-}
-
-// grab connects and reads whatever the service sends first, within the timeout.
-func (b *Banner) grab(ctx context.Context, ip netip.Addr, port uint16) string {
-	d := net.Dialer{Timeout: b.Timeout}
-	conn, err := d.DialContext(ctx, "tcp", netip.AddrPortFrom(ip, port).String())
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(b.Timeout))
-	buf := make([]byte, b.MaxRead)
-	n, _ := conn.Read(buf)
-	if n <= 0 {
-		return ""
-	}
-	return sanitizeBanner(buf[:n])
-}
+// banner.go: parsers for server-speaks-first banners. The grab itself is done by
+// the detect palier (detect.go); these turn a raw banner into a Service.
 
 // sanitizeBanner keeps the banner readable: first line, printable runes only,
 // trimmed and length-capped.
