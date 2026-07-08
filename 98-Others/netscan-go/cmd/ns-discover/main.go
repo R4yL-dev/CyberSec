@@ -250,7 +250,7 @@ func main() {
 	if runErr != nil {
 		if ctx.Err() != nil {
 			if st != nil {
-				pct := 100 * float64(atomic.LoadUint64(&pos)) / float64(space.Total())
+				pct := 100 * float64(atomic.LoadInt64(&scanned)) / float64(progTotal)
 				fmt.Fprintf(os.Stderr, "[*] interrupted at ~%.1f%% — resume with the same command + --resume\n", pct)
 			} else {
 				fmt.Fprintln(os.Stderr, "[*] interrupted (no --db, so nothing to resume — add --db next time)")
