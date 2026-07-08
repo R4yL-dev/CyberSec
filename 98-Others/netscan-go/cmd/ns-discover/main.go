@@ -78,10 +78,11 @@ func main() {
 	// --ports (explicit) wins; otherwise scan the N most common ports.
 	var ports []uint16
 	if *portsFlag != "" {
-		ports, err = parsePorts(*portsFlag)
-		if err != nil {
-			fatal("%v", err)
+		p, perr := parsePorts(*portsFlag)
+		if perr != nil {
+			fatal("%v", perr)
 		}
+		ports = p
 	} else {
 		common := enrich.CommonPorts()
 		n := *topPorts
