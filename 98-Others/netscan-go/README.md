@@ -335,6 +335,7 @@ Built-in graph:
 light ──RespondedHTTP──▶ webinfo
       ──RespondedHTTP──▶ crawl
       ──HasTLS─────────▶ tls-deep
+      ──HasNonHTTP─────▶ banner
       ──Always─────────▶ ptr
 ```
 
@@ -352,6 +353,10 @@ light ──RespondedHTTP──▶ webinfo
   (`robots.txt`, `sitemap.xml`, `.well-known/…`) and sensitive exposures (`/.git/HEAD`, `/.env`,
   `/server-status`, backups — signature-guarded against soft-404s), plus the `OPTIONS` methods.
   The most request-heavy palier; only for authorized targets.
+- **`banner`** (gated on a non-HTTP open port): grabs the banner that server-speaks-first
+  services send on connect (SSH/FTP/SMTP/POP3/IMAP/MySQL…), stores it raw (truncated), and parses
+  a product+version `Service` (source `banner`) with a CPE when known. To use it, scan the relevant
+  ports (e.g. `--ports 22,21,25,3306,...`) — the default `80,443,8080` is web-only.
 - **`ptr`** (always): reverse DNS.
 
 **GeoIP / ASN** is not a palier — it's a purely local lookup on the IP, done at **ingest** and

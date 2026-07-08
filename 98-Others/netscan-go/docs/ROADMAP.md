@@ -96,11 +96,13 @@ foundation. **Remaining:** `recheck` and config-file-driven wiring — all on th
 
 ## CVE chain (the end goal — sort/filter hosts by CVE)
 
-**Status:** foundation done (service/version extraction → `PortInfo.Services` with CPEs). Next:
-- **Non-web banner grabbing** (SSH/FTP/SMTP/DB…): expand `ns-discover` ports + a `banner` palier;
-  richest version source; writes into the same `PortInfo.Services`.
+**Status:** foundation + banners done — `PortInfo.Services` with CPEs, fed by the web analyzer
+(Server/X-Powered-By/generator) **and** the `banner` palier (server-speaks-first SSH/FTP/SMTP/DB…,
+gated `HasNonHTTP`). Next:
+- **More banner parsers / light probes** if coverage needs it (v1 is server-speaks-first only).
 - **CVE matching**: ingest NVD, match `Service.CPE` + version ranges → CVE list per host; then a
-  query/filter surface (`ns-status`/`ns-query`) to sort hosts by CVE. Big separate step.
+  query/filter surface (`ns-status`/`ns-query`) to sort hosts by CVE. Big separate step — the
+  `Service.CPE` data it consumes is now in place.
 
 **What.** Additional, heavier enrichment stages beyond `light` (e.g. full-body fetch and
 crawling, deeper certificate/chain analysis, tech fingerprinting), each gated by a **selector**
