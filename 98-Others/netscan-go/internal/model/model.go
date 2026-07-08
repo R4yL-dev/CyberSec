@@ -15,6 +15,7 @@ const (
 	StageWebinfo = "webinfo"  // richer HTTP fetch + analyzers (tech, headers, favicon)
 	StagePTR     = "ptr"      // reverse DNS
 	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
+	StageCrawl   = "crawl"    // well-known + sensitive paths + HTTP methods
 )
 
 // WireRecord is one line of NDJSON: what ns-discover emits for a responding
