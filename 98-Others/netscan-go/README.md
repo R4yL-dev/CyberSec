@@ -258,9 +258,10 @@ completion. Works in both `connect` and `syn` modes; `netscan scan --resume ...`
 `ns-discover` also raises its soft open-file limit to the hard limit on startup so connect mode
 can use enough workers; if the rate still can't be met it prints a one-line warning.
 
-**`ns-enrich` flags:** `--db`, `--stage light`, `--workers 50`, `--timeout 10s`,
-`--max-attempts 5`, `--lease 2m`, `--backoff 5s`, `--drain` (exit on first empty queue),
-`--follow` (drain until ingestion is done, then exit — used by `netscan scan` for overlap).
+**`ns-enrich` flags:** `--db`, `--stage` (comma-separated stages to drain; default: the whole
+pipeline), `--workers 50`, `--timeout 10s`, `--max-attempts 5`, `--lease 2m`, `--backoff 5s`,
+`--drain` (exit on first empty queue), `--follow` (drain until ingestion is done, then exit —
+used by `netscan scan` for overlap).
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
 rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.
@@ -313,14 +314,35 @@ plus `runs` (heartbeats). Semantics:
 
 All writes go through the single-writer connection; `ns-status` reads concurrently via WAL.
 
-### Enrichment (the `light` palier)
+### Enrichment (a composable pipeline of paliers)
 
-`internal/enrich` defines an `Enricher` interface; v1 ships one, `light`, ported from
-`netscan.py`. Per open port it does a cheap HTTP probe — one `GET` (following up to 10 redirects,
-reading at most 64 KiB of body) capturing status, `Server` header, redirect chain and `<title>`.
-Port 443 additionally gets a TLS certificate summary (version, subject CN, SANs, issuer,
-validity) from one handshake. Certificate verification is disabled (`InsecureSkipVerify`) because
-the goal is to observe what is served, not to trust it.
+Enrichment is a **graph of small paliers** (`internal/pipeline`), not a monolith. Each palier is
+an `Enricher` (`internal/enrich`) for one **stage** = one network interaction; each edge carries a
+**selector** deciding whether a host advances. `ns-enrich` drains the whole graph and, when a
+stage completes, enqueues the next stages whose selector passes (via the re-entrant queue). Two
+levels of composition: **stages** (gated, re-entrant, checkpointed) and, inside a fetch stage,
+small **analyzers** (pure functions on the fetched artifact) — so a stage fetches once and only
+small derived results are persisted (never raw bodies).
+
+Built-in graph:
+
+```
+light ──RespondedHTTP──▶ webinfo
+      ──Always─────────▶ ptr
+```
+
+- **`light`** (entry): cheap HTTP probe per open port — `GET` (≤10 redirects, ≤64 KiB body) →
+  status, `Server`, redirect chain, `<title>`; plus a TLS cert summary on 443 (version, CN, SANs,
+  issuer, validity). `InsecureSkipVerify` — the goal is to observe, not trust.
+- **`webinfo`** (gated on an HTTP response): one richer fetch → all headers, cookies, detected
+  technologies, security headers, and a Shodan-style favicon hash.
+- **`ptr`** (always): reverse DNS.
+
+Concurrent paliers on the same host can't clobber each other: `store.Complete` re-reads and
+**merges** under the single-writer lock (`HostRecord.Merge`).
+
+New paliers = a new `Enricher` + a stage/edge in `pipeline.Default`; new analyzers = a function in
+`internal/enrich/analyzers.go`.
 
 ## Data model & output
 

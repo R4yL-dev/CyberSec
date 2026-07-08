@@ -79,7 +79,13 @@ recheck and the host is re-probed with backoff/dead-letter honored.
 
 ## 2. Heavier enrichment paliers + selectors (multi-tier)
 
-**Status:** not started. `Enricher` and `Selector` interfaces exist; `Selector` is unused.
+**Status:** ✅ first increment done. Built the modular pipeline (`internal/pipeline`: a Go stage
+graph with per-edge selectors; `ns-enrich` drains the whole graph and enqueues next stages on
+completion), the two-level model (stages = one network interaction each, in-stage analyzers =
+pure functions), and shipped `webinfo` (headers/cookies/tech-detect/security-headers/favicon-hash)
++ `ptr` gated after `light`. Concurrent paliers merge via `store.Complete`/`HostRecord.Merge`
+instead of clobbering. **Remaining:** more analyzers/paliers (`tls-deep`/JARM, crawl/sensitive
+paths, GeoIP/ASN) and config-file-driven wiring — all on this same pattern.
 
 **What.** Additional, heavier enrichment stages beyond `light` (e.g. full-body fetch and
 crawling, deeper certificate/chain analysis, tech fingerprinting), each gated by a **selector**
