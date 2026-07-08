@@ -56,6 +56,26 @@ func TestIngestClaimHost(t *testing.T) {
 	}
 }
 
+func TestIngestUnionsOpenPorts(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	// SYN streaming ingests a host's ports in separate records; they must union.
+	if err := s.Ingest(ctx, rec("9.9.9.9", 80), model.StageLight); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ingest(ctx, rec("9.9.9.9", 443), model.StageLight); err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.Host(ctx, netip.MustParseAddr("9.9.9.9"))
+	if err != nil || h == nil {
+		t.Fatalf("Host: %v %v", h, err)
+	}
+	if len(h.OpenPorts) != 2 || h.OpenPorts[0] != 80 || h.OpenPorts[1] != 443 {
+		t.Fatalf("open ports = %v, want [80 443]", h.OpenPorts)
+	}
+}
+
 func TestDedupPending(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)

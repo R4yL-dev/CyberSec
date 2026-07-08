@@ -21,6 +21,7 @@ usage:
   netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [ns-discover flags...]
   netscan status [--db FILE] [--host IP] [--interval DUR]
   netscan discover|ingest|enrich [flags...]     # pass through to the raw binary
+  netscan iptables-clean                        # remove leftover SYN RST guards
 
 examples:
   netscan scan --targets 1.1.1.0/24 --db scan.db
@@ -75,17 +76,33 @@ cmd_scan() {
 	return $rc
 }
 
+# cmd_iptables_clean removes any leftover RST guards tagged by syn-scan.sh
+# (e.g. from a SYN scan that was hard-killed before it could clean up).
+cmd_iptables_clean() {
+	local n=0 spec
+	while IFS= read -r spec; do
+		[[ -n "$spec" ]] || continue
+		# spec: "-A OUTPUT -p tcp ... --comment netscan-rst-guard -j DROP"
+		# shellcheck disable=SC2086
+		if sudo iptables -D ${spec#-A } 2>/dev/null; then
+			n=$((n + 1))
+		fi
+	done < <(sudo iptables -S OUTPUT 2>/dev/null | grep -F -- netscan-rst-guard)
+	echo "netscan: removed $n leftover netscan RST guard(s)" >&2
+}
+
 main() {
 	[[ $# -ge 1 ]] || usage
 	local cmd="$1"; shift
 	case "$cmd" in
-		scan)          cmd_scan "$@" ;;
-		status)        need ns-status;   exec "$BIN/ns-status" "$@" ;;
-		discover)      need ns-discover; exec "$BIN/ns-discover" "$@" ;;
-		ingest)        need ns-ingest;   exec "$BIN/ns-ingest" "$@" ;;
-		enrich)        need ns-enrich;   exec "$BIN/ns-enrich" "$@" ;;
+		scan)           cmd_scan "$@" ;;
+		status)         need ns-status;   exec "$BIN/ns-status" "$@" ;;
+		discover)       need ns-discover; exec "$BIN/ns-discover" "$@" ;;
+		ingest)         need ns-ingest;   exec "$BIN/ns-ingest" "$@" ;;
+		enrich)         need ns-enrich;   exec "$BIN/ns-enrich" "$@" ;;
+		iptables-clean) cmd_iptables_clean ;;
 		-h|--help|help) usage ;;
-		*)             die "unknown command '$cmd' (see 'netscan --help')" ;;
+		*)              die "unknown command '$cmd' (see 'netscan --help')" ;;
 	esac
 }
 
