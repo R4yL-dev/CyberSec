@@ -29,11 +29,11 @@ func unionPorts(a, b []uint16) []uint16 {
 // Stage names for the domain-B work queue — one per enrichment palier. New
 // paliers add a constant here and an entry in internal/pipeline.
 const (
-	StageDetect  = "detect"   // protocol-aware first contact (entry palier)
-	StageWebinfo = "webinfo"  // richer HTTP fetch + analyzers (tech, headers, favicon)
-	StagePTR     = "ptr"      // reverse DNS
-	StageTLSDeep = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
-	StageCrawl   = "crawl"    // well-known + sensitive paths + HTTP methods
+	StageDetect   = "detect"   // protocol-aware first contact (entry palier)
+	StageWebinfo  = "webinfo"  // richer HTTP fetch + analyzers (tech, headers, favicon)
+	StagePTR      = "ptr"      // reverse DNS
+	StageTLSDeep  = "tls-deep" // deep TLS: chain, versions/ciphers, JARM
+	StageCrawl    = "crawl"    // well-known + sensitive paths + HTTP methods
 	StagePortscan = "portscan" // deep per-host port sweep (opt-in)
 )
 
