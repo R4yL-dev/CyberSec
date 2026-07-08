@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"netscan/internal/geoip"
 	"netscan/internal/model"
 	"netscan/internal/store"
 	"netscan/internal/stream"
@@ -24,9 +25,21 @@ import (
 
 func main() {
 	dbPath := flag.String("db", "", "SQLite database path")
+	geoPath := flag.String("geoip", "data/dbip-country.mmdb", "GeoIP .mmdb (country/city); \"\" to disable")
+	asnPath := flag.String("asn", "data/dbip-asn.mmdb", "ASN .mmdb; \"\" to disable")
 	flag.Parse()
 	if *dbPath == "" {
 		fatal("--db is required")
+	}
+
+	// Geo is on by default when the DBs exist (see `make geoip`); a missing file
+	// is skipped silently with a one-time hint, never fatal.
+	geo := geoip.Open(existing(*geoPath), existing(*asnPath))
+	defer geo.Close()
+	if geo.Enabled() {
+		fmt.Fprintln(os.Stderr, "[*] geoip   : enabled")
+	} else if *geoPath != "" || *asnPath != "" {
+		fmt.Fprintln(os.Stderr, "[*] geoip   : no database found (run 'make geoip'); continuing without geo")
 	}
 
 	st, err := store.Open(*dbPath)
@@ -45,7 +58,7 @@ func main() {
 	stopHB := heartbeat(ctx, st, &n)
 
 	err = stream.Decode(os.Stdin, func(rec model.WireRecord) error {
-		if err := st.Ingest(ctx, rec, model.StageLight); err != nil {
+		if err := st.Ingest(ctx, rec, model.StageLight, geo.Annotate(rec.IP)); err != nil {
 			return err
 		}
 		atomic.AddInt64(&n, 1)
@@ -89,6 +102,18 @@ func writeHeartbeat(ctx context.Context, st *store.SQLite, counter int64) {
 		Counter:   counter,
 		UpdatedAt: time.Now().UTC(),
 	})
+}
+
+// existing returns path if it points to a readable file, else "" (so a default
+// path that isn't populated yet is treated as "disabled", not an error).
+func existing(path string) string {
+	if path == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
 }
 
 func fatal(format string, args ...any) {

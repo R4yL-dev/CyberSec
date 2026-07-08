@@ -165,13 +165,15 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 		return err
 	}
 
+	// geo is written on first insert only; the conflict update leaves it intact
+	// (it's a property of the IP and doesn't change between re-ingests).
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO hosts(ip, open_ports, first_seen, last_seen)
-		VALUES(?, ?, ?, ?)
+		INSERT INTO hosts(ip, open_ports, geo, first_seen, last_seen)
+		VALUES(?, ?, ?, ?, ?)
 		ON CONFLICT(ip) DO UPDATE SET
 			open_ports = excluded.open_ports,
 			last_seen  = excluded.last_seen`,
-		rec.IP.String(), string(ports), now, now); err != nil {
+		rec.IP.String(), string(ports), geoJSON, now, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -224,14 +226,14 @@ func (s *SQLite) Claim(ctx context.Context, stage string, n int, lease time.Dura
 
 func (s *SQLite) Host(ctx context.Context, ip netip.Addr) (*model.HostRecord, error) {
 	var (
-		portsJSON, dataJSON, statusJSON, ptrJSON string
-		attempts                                 int
-		firstSeen, lastSeen                      int64
+		portsJSON, dataJSON, statusJSON, ptrJSON, geoJSON string
+		attempts                                          int
+		firstSeen, lastSeen                               int64
 	)
 	err := s.r.QueryRowContext(ctx, `
-		SELECT open_ports, data, status, ptr, attempts, first_seen, last_seen
+		SELECT open_ports, data, status, ptr, geo, attempts, first_seen, last_seen
 		FROM hosts WHERE ip=?`, ip.String()).
-		Scan(&portsJSON, &dataJSON, &statusJSON, &ptrJSON, &attempts, &firstSeen, &lastSeen)
+		Scan(&portsJSON, &dataJSON, &statusJSON, &ptrJSON, &geoJSON, &attempts, &firstSeen, &lastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -246,6 +248,9 @@ func (s *SQLite) Host(ctx context.Context, ip netip.Addr) (*model.HostRecord, er
 	unmarshalJSON(dataJSON, &h.Ports)
 	unmarshalJSON(statusJSON, &h.Status)
 	unmarshalJSON(ptrJSON, &h.PTR)
+	if geoJSON != "" {
+		unmarshalJSON(geoJSON, &h.Geo)
+	}
 	return h, nil
 }
 
