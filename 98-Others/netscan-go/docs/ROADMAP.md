@@ -283,9 +283,11 @@ a concrete new reason.
 ## Adjacent ideas (mentioned in passing, not yet designed)
 
 Lower-priority and **not** yet agreed in detail — capture only, do not treat as committed scope:
-- **Scan resume/checkpoint** (persist the permutation position so an interrupted internet-wide
-  scan can resume, like masscan `--resume`). `--seed` already makes order reproducible; resuming
-  additionally needs to persist the last emitted position.
+- **Scan resume/checkpoint** — ✅ **done.** `ns-discover --db X` checkpoints the permutation
+  position to `meta.discover.checkpoint` (with a target signature + seed) every second;
+  `ns-discover --resume` reloads it, verifies the signature, and restarts from that position
+  (rewound past the connect feed's in-flight window so it overlaps rather than gaps). The
+  checkpoint is cleared on clean completion. See `target.RandomizedFrom` / `Signature`.
 - **Pluggable output sinks** beyond the store (e.g. JSON file / Elasticsearch) behind a `Sink`-style
   interface.
 - **Richer HTTP fidelity** (take `Server`/`title` from the first hop rather than the final

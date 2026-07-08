@@ -244,8 +244,15 @@ guard with `netscan iptables-clean`.
 | `--retries`          | `1`        | SYN passes over the target set — retransmits are spaced across the whole scan, not back-to-back (syn mode). |
 | `--grace`            | `3s`       | Wait for late replies after sending (syn mode).            |
 | `--src-port`         | `0`        | SYN source port (`0` = random; pin to scope the iptables rule). |
-| `--db`               | —          | Optional SQLite DB to report scan progress into, for `ns-status` (never touches the work queue). |
-| `--yes`              | `false`    | Confirm scans larger than 65536 addresses.                 |
+| `--db`               | —          | Optional SQLite DB for progress/checkpoint reporting (for `ns-status`; never touches the work queue). |
+| `--resume`           | `false`    | Resume from the last checkpoint in `--db` (same targets/seed).       |
+| `--yes`              | `false`    | Confirm scans larger than 65536 addresses, or `--rate 0`.  |
+
+**Resuming an interrupted scan.** With `--db`, discovery checkpoints its position every second.
+If a long scan dies (crash, Ctrl-C, reboot), re-run the same command with `--resume` and it picks
+up where it left off — the scan order is seed-deterministic, so it replays only the remaining
+addresses (rewound slightly to overlap, never gap). The checkpoint is discarded on clean
+completion. Works in both `connect` and `syn` modes; `netscan scan --resume ...` passes it through.
 
 `ns-discover` also raises its soft open-file limit to the hard limit on startup so connect mode
 can use enough workers; if the rate still can't be met it prints a one-line warning.
