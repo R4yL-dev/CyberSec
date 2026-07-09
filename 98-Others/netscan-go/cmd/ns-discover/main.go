@@ -47,7 +47,7 @@ func main() {
 		noReserved  = flag.Bool("no-skip-reserved", false, "do NOT skip reserved/private ranges")
 		portsFlag   = flag.String("ports", "", "ports to scan: list/ranges like 80,443,8000-8100 or 'all' (overrides --top-ports)")
 		topPorts    = flag.Int("top-ports", 100, "scan the N most common ports (used unless --ports is given)")
-		mode        = flag.String("mode", "connect", "discovery mode: connect|syn")
+		mode        = flag.String("mode", "connect", "discovery mode: connect|syn|icmp")
 		ratePPS     = flag.Float64("rate", 1000, "max probes per second (0 = unlimited)")
 		workers     = flag.Int("workers", -1, "concurrent workers, connect mode (-1 = auto from rate x timeout, bounded by FDs)")
 		dbPath      = flag.String("db", "", "optional SQLite DB to report scan progress into (for ns-status)")
@@ -59,6 +59,7 @@ func main() {
 		resume      = flag.Bool("resume", false, "resume from the last checkpoint in --db (requires --db)")
 		progress    = flag.Bool("progress", false, "print a live progress line to stderr (\\r on a TTY, periodic lines otherwise)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
+		label       = flag.String("label", "", "short sweep label surfaced in ns-status (e.g. broad, ping, widening N blocks)")
 	)
 	flag.Parse()
 
@@ -127,9 +128,10 @@ func main() {
 			fatal("open store: %v", err)
 		}
 		defer st.Close()
-		// Stamp the scan start so ns-status can show elapsed time. A resume keeps
-		// the original start; a fresh run (re)sets it.
-		if !*resume {
+		// Stamp the scan start (for ns-status "elapsed") only if unset, so the
+		// several ns-discover invocations of an adaptive scan (broad, ping, widen)
+		// share one start and a resume keeps the original.
+		if v, _ := st.GetMeta(context.Background(), store.MetaScanStarted); v == "" {
 			_ = st.SetMeta(context.Background(), store.MetaScanStarted,
 				strconv.FormatInt(time.Now().UnixMilli(), 10))
 		}
@@ -229,7 +231,7 @@ func main() {
 	var progStop func()
 	if st != nil || *progress {
 		progStop = startReporter(st, *progress, isTerminal(os.Stderr),
-			progTotal, &scanned, &found, sig, seed, &pos, space.Total())
+			progTotal, &scanned, &found, sig, seed, &pos, space.Total(), *label)
 	}
 
 	// Encode discovered hosts to stdout while the prober runs, flushing each one
