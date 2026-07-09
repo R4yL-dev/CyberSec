@@ -59,3 +59,37 @@ func TestExtractServices(t *testing.T) {
 		t.Errorf("wordpress service = %v", got)
 	}
 }
+
+// httpHeaderSigs recognize products from headers other than Server/X-Powered-By.
+func TestExtractServicesHeaderSigs(t *testing.T) {
+	cases := []struct {
+		headers          map[string]string
+		product, version string
+	}{
+		{map[string]string{"X-Jenkins": "2.426.1"}, "jenkins", "2.426.1"},
+		{map[string]string{"X-Drupal-Dynamic-Cache": "MISS"}, "drupal", ""},
+		{map[string]string{"X-Kibana-Version": "7.17.0"}, "kibana", "7.17.0"},
+		{map[string]string{"X-Confluence-Request-Time": "1234"}, "confluence", ""},
+		{map[string]string{"WWW-Authenticate": `Basic realm="GitLab"`}, "gitlab", ""},
+		// needle mismatch: a generic Basic realm is not a product signal.
+		{map[string]string{"WWW-Authenticate": `Basic realm="Restricted"`}, "", ""},
+	}
+	for _, c := range cases {
+		svcs := extractServices(c.headers, nil)
+		found := ""
+		for _, s := range svcs {
+			if s.Product == c.product {
+				found = s.Version
+			}
+		}
+		if c.product == "" {
+			if len(svcs) != 0 {
+				t.Errorf("headers %v: want no service, got %+v", c.headers, svcs)
+			}
+			continue
+		}
+		if len(svcs) == 0 || found != c.version {
+			t.Errorf("headers %v: want %s@%s, got %+v", c.headers, c.product, c.version, svcs)
+		}
+	}
+}
