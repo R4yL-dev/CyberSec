@@ -556,8 +556,11 @@ func (s *SQLite) scanFindings(ctx context.Context, sm *Summary) error {
 
 // topPorts returns the most-common open ports across hosts, most-frequent first.
 func (s *SQLite) topPorts(ctx context.Context, limit int) ([]PortCount, error) {
+	// A portless (ICMP-alive) host has open_ports = "null"; json_each on a JSON
+	// null yields one NULL-value row — filter it so the port scan doesn't hit NULL.
 	rows, err := s.r.QueryContext(ctx, `
 		SELECT p.value, count(*) FROM hosts, json_each(hosts.open_ports) p
+		WHERE p.value IS NOT NULL
 		GROUP BY p.value ORDER BY 2 DESC, p.value LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
