@@ -22,6 +22,9 @@ type Portscan struct {
 }
 
 func NewPortscan(ports []uint16, timeout time.Duration) *Portscan {
+	if timeout <= 0 {
+		timeout = 2 * time.Second // sane default for a port sweep
+	}
 	return &Portscan{Ports: ports, Timeout: timeout, Concurrency: 200}
 }
 

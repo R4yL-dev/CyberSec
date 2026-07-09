@@ -44,8 +44,9 @@ func (p Pipeline) Stages() []string {
 // Options carries per-build configuration passed to enricher constructors
 // (kept out of the YAML: typed and supplied via CLI flags).
 type Options struct {
-	Timeout   time.Duration
-	DeepPorts []uint16 // for the portscan palier
+	Timeout     time.Duration
+	DeepPorts   []uint16      // for the portscan palier
+	DeepTimeout time.Duration // per-port connect timeout for portscan (short: it's a sweep)
 }
 
 // enrichers maps a stage/enricher name to its constructor. The map key is both
@@ -56,7 +57,7 @@ var enrichers = map[string]func(Options) enrich.Enricher{
 	model.StageCrawl:    func(o Options) enrich.Enricher { return enrich.NewCrawl(o.Timeout) },
 	model.StageTLSDeep:  func(o Options) enrich.Enricher { return enrich.NewTLSDeep(o.Timeout) },
 	model.StagePTR:      func(Options) enrich.Enricher { return enrich.NewPTR() },
-	model.StagePortscan: func(o Options) enrich.Enricher { return enrich.NewPortscan(o.DeepPorts, o.Timeout) },
+	model.StagePortscan: func(o Options) enrich.Enricher { return enrich.NewPortscan(o.DeepPorts, o.DeepTimeout) },
 }
 
 // selectors maps a config `when:` name to its predicate. Empty/absent = always.
@@ -65,6 +66,7 @@ var selectors = map[string]enrich.Selector{
 	"is_web":         enrich.IsWeb,
 	"has_tls":        enrich.HasTLS,
 	"needs_portscan": enrich.NeedsPortscan,
+	"has_new_ports":  enrich.HasNewPorts,
 }
 
 // Config is the YAML shape of a pipeline.

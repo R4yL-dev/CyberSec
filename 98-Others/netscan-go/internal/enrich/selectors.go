@@ -25,6 +25,18 @@ func NeedsPortscan(h *model.HostRecord) bool {
 	return !done
 }
 
+// HasNewPorts passes if an open port has no detect result yet — i.e. portscan
+// found a port beyond what detect already classified. Gates the portscan →
+// detect re-entry so it only fires (and re-enriches) when there is something new.
+func HasNewPorts(h *model.HostRecord) bool {
+	for _, p := range h.OpenPorts {
+		if h.Ports == nil || h.Ports[p] == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // HasTLS passes if any port completed a TLS handshake (on any port, not just
 // 443) — detect records a cert summary whenever TLS is present.
 func HasTLS(h *model.HostRecord) bool {
