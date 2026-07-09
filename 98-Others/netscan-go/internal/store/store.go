@@ -74,12 +74,12 @@ type LabelCount struct {
 // Summary is a monitoring snapshot for ns-status: queue progress plus an
 // aggregated view of what the scan has found so far.
 type Summary struct {
-	Hosts       int64
-	WorkByState map[string]int64            // pending / leased / done / failed
-	QueueByStage map[string]map[string]int64 // stage -> state -> count
-	StageCoverage map[string]int64           // stage -> hosts that completed it
-	Runs        []RunStat
-	RecentHosts []HostSummary
+	Hosts         int64
+	WorkByState   map[string]int64            // pending / leased / done / failed
+	QueueByStage  map[string]map[string]int64 // stage -> state -> count
+	StageCoverage map[string]int64            // stage -> hosts that completed it
+	Runs          []RunStat
+	RecentHosts   []HostSummary
 
 	// Findings — aggregated from the hosts' enrichment JSON.
 	TopPorts       []PortCount

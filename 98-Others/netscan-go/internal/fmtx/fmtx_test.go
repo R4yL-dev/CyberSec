@@ -28,8 +28,8 @@ func TestBar(t *testing.T) {
 		{0, 4, "░░░░"},
 		{1, 4, "████"},
 		{0.5, 4, "██░░"},
-		{-1, 3, "░░░"},  // clamped low
-		{2, 3, "███"},   // clamped high
+		{-1, 3, "░░░"}, // clamped low
+		{2, 3, "███"},  // clamped high
 		{0.62, 10, "██████░░░░"},
 	}
 	for _, c := range cases {

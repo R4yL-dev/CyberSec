@@ -384,7 +384,7 @@ func (s *SQLite) Summary(ctx context.Context) (Summary, error) {
 	}
 	// Per-stage host coverage: keys present in each host's status map = completed stages.
 	if err := scanCounts(ctx, s.r,
-		`SELECT jt.key, count(*) FROM hosts, json_each(hosts.status) jt GROUP BY jt.key`,
+		`SELECT jt.key, count(*) FROM hosts, json_each(hosts.status) jt WHERE jt.key IS NOT NULL GROUP BY jt.key`,
 		sm.StageCoverage); err != nil {
 		return sm, err
 	}
