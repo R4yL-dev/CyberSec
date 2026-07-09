@@ -45,6 +45,9 @@ const (
 	ProtoSSH     = "ssh"
 	ProtoFTP     = "ftp"
 	ProtoSMTP    = "smtp"
+	ProtoPOP3    = "pop3"
+	ProtoIMAP    = "imap"
+	ProtoVNC     = "vnc"
 	ProtoBanner  = "banner" // some other speak-first plaintext service
 	ProtoUnknown = "unknown"
 )
