@@ -265,8 +265,9 @@ can use enough workers; if the rate still can't be met it prints a one-line warn
 
 **`ns-enrich` flags:** `--db`, `--stage` (comma-separated stages to drain; default: the whole
 pipeline), `--pipeline <file.yaml>` (custom pipeline; default: built-in graph), `--print-pipeline`
-(dump the default YAML as a template), `--ports-deep` / `--ports-deep-timeout 2s` (portscan
-breadth/timeout), `--workers 50`, `--timeout 10s`, `--max-attempts 5`,
+(dump the default YAML as a template), `--all-ports <spec>` / `--all-ports-timeout 2s` (inject the
+portscan palier and set its sweep breadth/timeout; mutually exclusive with `--pipeline`),
+`--workers 50`, `--timeout 10s`, `--max-attempts 5`,
 `--lease 2m`, `--backoff 5s`, `--drain` (exit on first empty queue), `--follow` (drain until
 ingestion is done, then exit — used by `netscan scan` for overlap).
 
@@ -294,21 +295,26 @@ the graph (entry present, known names, edges resolve).
 
 **Deep per-host port scan (`portscan`).** Discovery scans a small common port set across the whole
 address space (fast); the `portscan` palier then sweeps a host's ports (the slow, per-host phase).
-It's **opt-in** via the `profiles/deep.yaml` profile and the most aggressive palier (many connects
-per host — heavy on NAT):
+It's **opt-in** via the single `--all-ports` flag — no profile file needed. It's the most
+aggressive palier (many connects per host — heavy on NAT):
 
 ```bash
-netscan scan --targets 1.1.1.0/24 --db scan.db --pipeline profiles/deep.yaml --ports-deep all
+netscan scan --targets 1.1.1.0/24 --all-ports          # sweep the common set
+netscan scan --targets 1.1.1.0/24 --all-ports all      # sweep 1-65535
+netscan scan --targets 1.1.1.0/24 --all-ports 1-1024,3306,8000-8100
 ```
 
-`--ports-deep` is `all` (1-65535), a spec like `1-1024,3306,8000-8100`, or empty (a curated common
-set). `--ports-deep-timeout` (default `2s`) is the per-port connect timeout — short because it's a
-sweep; raise it on high-latency/lossy networks to avoid missing slow-but-open ports (a filtered
-port costs the full timeout). Newly-found ports are unioned into the host and **re-classified/
-enriched by re-entering `detect`** — but only when portscan actually found new ports (the
-`portscan → detect` edge is gated `has_new_ports`, so no wasteful double-enrichment otherwise; the
-`needs_portscan` guard runs portscan once). `ns-discover --top-ports N` scans the N most common
-ports for the discovery phase.
+`--all-ports` injects the `portscan` stage into the default pipeline (via `pipeline.WithPortscan`,
+wiring `detect → portscan (needs_portscan)` and `portscan → detect (has_new_ports)`). Its value is
+bare/`common` (a curated common set), `all` (1-65535), or a spec like `1-1024,3306,8000-8100`.
+`--all-ports-timeout` (default `2s`) is the per-port connect timeout — short because it's a sweep;
+raise it on high-latency/lossy networks to avoid missing slow-but-open ports (a filtered port costs
+the full timeout). Newly-found ports are unioned into the host and **re-classified/enriched by
+re-entering `detect`** — but only when portscan actually found new ports (the `portscan → detect`
+edge is gated `has_new_ports`, so no wasteful double-enrichment otherwise; the `needs_portscan`
+guard runs portscan once). To widen the *discovery* phase instead, use `--top-ports N` (scan the N
+most common ports across the whole address space). `--all-ports` and `--pipeline` are mutually
+exclusive — wire portscan into your custom graph directly if you need both.
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
 rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.
