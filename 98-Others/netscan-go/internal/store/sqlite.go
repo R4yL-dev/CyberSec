@@ -130,12 +130,14 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 	// Union the new open ports with any already recorded — SYN discovery streams
 	// a host's ports in separate records, so re-ingest must accumulate, not replace.
 	merged := rec.OpenPorts
+	prevLen := 0
 	var existing string
 	switch err := tx.QueryRowContext(ctx, `SELECT open_ports FROM hosts WHERE ip=?`,
 		rec.IP.String()).Scan(&existing); err {
 	case nil:
 		var prev []uint16
 		if json.Unmarshal([]byte(existing), &prev) == nil {
+			prevLen = len(prev)
 			merged = model.UnionPorts(prev, rec.OpenPorts)
 		}
 	case sql.ErrNoRows:
