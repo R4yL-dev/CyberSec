@@ -227,9 +227,6 @@ func main() {
 	fmt.Fprintf(os.Stderr, "[*] targets : %s addresses (seed=%d)\n", fmtx.Count(space.Total()), seed)
 	fmt.Fprintf(os.Stderr, "[*] ports   : %d port(s) | mode=%s | rate=%.0f pps | workers=%d\n",
 		len(ports), *mode, *ratePPS, effWorkers)
-	if st != nil && !*resume {
-		fmt.Fprintln(os.Stderr, "[*] resume  : checkpoint on — Ctrl+C is safe; re-run the same command with --resume")
-	}
 
 	// Reporting: store heartbeat/checkpoint (with --db) and/or an inline progress
 	// line (with --progress). Discover only writes its own heartbeat/checkpoint —
