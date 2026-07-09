@@ -208,9 +208,31 @@ cmd_scan() {
 	[[ $all_ports_set -eq 1 ]] && enrich+=(--all-ports "$all_ports")
 	[[ -n "$pipeline_file" ]] && enrich+=(--pipeline "$pipeline_file")
 
+	# --- db reuse warning: a scan appends to its --db; reusing one across ranges
+	#     mixes results. --resume is the deliberate "continue the last scan" path. ---
+	local resuming=0
+	{ [[ ${#tune[@]} -gt 0 ]] && printf '%s\n' "${tune[@]}" | grep -qx -- '--resume'; } && resuming=1
+	if [[ $resuming -eq 0 && -s "$db" ]]; then
+		note "reusing existing $db — new results MERGE with prior data (fresh scan: new --db, or 'rm ${db}*')"
+	fi
+
+	# --- interrupt handling: one Ctrl+C stops the WHOLE scan cleanly (kill the
+	#     background enricher, don't march on to the next pass) ---
+	local epid="" aborted=0
+	_scan_abort() {
+		[[ $aborted -eq 1 ]] && return 0; aborted=1
+		trap '' INT TERM
+		echo >&2; note "interrupted — stopping scan"
+		[[ -n "$epid" ]] && kill -TERM "$epid" 2>/dev/null || true
+		wait "$epid" 2>/dev/null || true
+		note "partial results kept in $db  (view: netscan status --db $db  ·  fresh start: rm ${db}*)"
+		exit 130
+	}
+	trap _scan_abort INT TERM
+
 	# --- run: enrichment follows discovery live ---
 	"${pre[@]}" "$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
-	local epid=$!
+	epid=$!
 	note "live dashboard (other terminal) ->  netscan status --db $db --interval 2s"
 
 	local rc=0
@@ -230,6 +252,7 @@ cmd_scan() {
 					--targets "$tgt_csv" "${excl[@]}" "${tune[@]}"
 			fi
 		} | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+		[[ $rc -eq 130 ]] && _scan_abort   # interrupted → don't start pass 2
 
 		# Derive live /24 blocks and widen ports on them (or finalize if none).
 		local blocks; blocks="$(mktemp)"
@@ -247,6 +270,7 @@ cmd_scan() {
 		fi
 		rm -f "$blocks"
 	fi
+	[[ $rc -eq 130 ]] && _scan_abort   # interrupted during the last pass
 
 	[[ $rc -ne 0 ]] && kill "$epid" 2>/dev/null || true
 	wait "$epid" 2>/dev/null || true
