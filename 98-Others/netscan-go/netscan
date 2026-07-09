@@ -223,8 +223,12 @@ cmd_scan() {
 		# intermediate ingest keeps the --follow enricher alive for pass 2.
 		{
 			run_sweep broad --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}"
-			[[ $use_syn -eq 1 ]] && "$BIN/ns-discover" --mode icmp --label ping --db "$db" \
-				--targets "$tgt_csv" "${excl[@]}" "${tune[@]}"
+			# ICMP liveness sweep only when privileged; if/fi so a connect-mode run
+			# doesn't leave the block with a false (non-zero) exit → pipefail → rc.
+			if [[ $use_syn -eq 1 ]]; then
+				"$BIN/ns-discover" --mode icmp --label ping --db "$db" \
+					--targets "$tgt_csv" "${excl[@]}" "${tune[@]}"
+			fi
 		} | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 
 		# Derive live /24 blocks and widen ports on them (or finalize if none).
