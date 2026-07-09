@@ -72,6 +72,7 @@ passwordless_sudo() { sudo -n true 2>/dev/null; }
 cmd_scan() {
 	local db="$DEFAULT_DB"
 	local method="auto"                 # auto | syn | connect
+	local syn_set=0 connect_set=0
 	local ports_set=0 topports_set=0
 	local all_ports="" all_ports_set=0
 	local pipeline_file=""
@@ -83,8 +84,8 @@ cmd_scan() {
 			--db) db="$2"; shift 2 ;;
 			--db=*) db="${1#*=}"; shift ;;
 			# method
-			--syn) method="syn"; shift ;;
-			--connect) method="connect"; shift ;;
+			--syn) method="syn"; syn_set=1; shift ;;
+			--connect) method="connect"; connect_set=1; shift ;;
 			# discovery (forwarded to ns-discover)
 			--ports|--ports=*) ports_set=1; disc+=("$1"); [[ "$1" == "--ports" ]] && { disc+=("$2"); shift; }; shift ;;
 			--top-ports|--top-ports=*) topports_set=1; disc+=("$1"); [[ "$1" == "--top-ports" ]] && { disc+=("$2"); shift; }; shift ;;
@@ -112,6 +113,7 @@ cmd_scan() {
 	done
 
 	# --- validation: errors on true conflicts, warnings on no-ops ---
+	[[ $syn_set -eq 1 && $connect_set -eq 1 ]] && die "--syn and --connect are mutually exclusive"
 	[[ $ports_set -eq 1 && $topports_set -eq 1 ]] && die "--ports and --top-ports are mutually exclusive"
 	[[ $all_ports_set -eq 1 && -n "$pipeline_file" ]] && die "--all-ports and --pipeline are mutually exclusive"
 	if [[ $all_ports_set -eq 0 ]] && printf '%s\n' "${enrich[@]}" | grep -q -- '--all-ports-timeout'; then
