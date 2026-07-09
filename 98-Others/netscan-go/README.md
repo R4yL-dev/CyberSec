@@ -329,7 +329,7 @@ exclusive — wire portscan into your custom graph directly if you need both.
 palier** (pending, `▸` = leased/in-flight, plus failed), and a **findings** block aggregated from the
 hosts' enrichment JSON via SQLite JSON1: top ports, protocol mix, web-server count, TLS ports with
 expired/weak-crypto counts, sensitive crawl paths, and geo breakdown. In live mode it refreshes in
-place and **auto-exits with a `✓ SCAN TERMINÉ` banner once complete** (no more infinite loop). Run it
+place and **auto-exits with a `✓ SCAN COMPLETE` banner once complete** (no more infinite loop). Run it
 in a second terminal during a scan (`netscan status --db scan.db --interval 2s`); `netscan scan` also
 prints this summary once at the end.
 **`ns-ingest` flags:** `--db`.

@@ -167,7 +167,7 @@ func (r *renderer) discoveryBar(sm store.Summary, ph phase, now time.Time) {
 		return
 	}
 	if ph != phaseDiscovering {
-		r.bar("découverte", 1, r.col.dim("terminé"))
+		r.bar("discovery", 1, r.col.dim("done"))
 		return
 	}
 	frac := 0.0
@@ -186,7 +186,7 @@ func (r *renderer) discoveryBar(sm store.Summary, ph phase, now time.Time) {
 	if rs.Note != "" {
 		right += "  " + r.col.dim(rs.Note)
 	}
-	r.bar("découverte", frac, right)
+	r.bar("discovery", frac, right)
 }
 
 // enrichmentBar shows enrichment progress as done/(done+remaining), with rate
@@ -207,7 +207,7 @@ func (r *renderer) enrichmentBar(sm store.Summary, now time.Time, done, remainin
 			}
 		}
 	}
-	r.bar("enrichisst", frac, right)
+	r.bar("enrichment", frac, right)
 }
 
 // queueLine shows where enrichment work is sitting, per palier (pending, with a
@@ -242,7 +242,7 @@ func (r *renderer) queueLine(sm store.Summary, failed int64) {
 		parts = append(parts, r.col.red(fmt.Sprintf("failed %d", failed)))
 	}
 	if len(parts) > 0 {
-		fmt.Printf("  %s   %s\n", r.col.dim("file"), strings.Join(parts, " · "))
+		fmt.Printf("  %s  %s\n", r.col.dim("queue"), strings.Join(parts, " · "))
 	}
 }
 
@@ -278,10 +278,10 @@ func (r *renderer) findings(sm store.Summary) {
 		tls := fmt.Sprintf("tls %d", sm.TLSPorts)
 		var warn []string
 		if sm.TLSExpired > 0 {
-			warn = append(warn, fmt.Sprintf("%d expirés", sm.TLSExpired))
+			warn = append(warn, fmt.Sprintf("%d expired", sm.TLSExpired))
 		}
 		if sm.TLSWeak > 0 {
-			warn = append(warn, fmt.Sprintf("%d faibles", sm.TLSWeak))
+			warn = append(warn, fmt.Sprintf("%d weak", sm.TLSWeak))
 		}
 		if len(warn) > 0 {
 			tls += " (" + c.red(strings.Join(warn, ", ")) + ")"
@@ -289,7 +289,7 @@ func (r *renderer) findings(sm store.Summary) {
 		wp = append(wp, tls)
 	}
 	if sm.SensitivePaths > 0 {
-		wp = append(wp, c.red(fmt.Sprintf("crawl %d sensibles", sm.SensitivePaths)))
+		wp = append(wp, c.red(fmt.Sprintf("crawl %d sensitive", sm.SensitivePaths)))
 	}
 	if len(wp) > 0 {
 		row("web", strings.Join(wp, " · "))
@@ -299,7 +299,7 @@ func (r *renderer) findings(sm store.Summary) {
 	}
 
 	if len(sm.RecentHosts) > 0 {
-		row("derniers", "")
+		row("latest", "")
 		for i, h := range sm.RecentHosts {
 			if i >= 5 {
 				break
@@ -307,7 +307,7 @@ func (r *renderer) findings(sm store.Summary) {
 			fmt.Printf("    %-15s %s\n", h.IP, portsList(h.OpenPorts))
 		}
 	}
-	fmt.Printf("  %s\n", c.dim("→ détails: netscan status --db "+r.db+" --host <IP>"))
+	fmt.Printf("  %s\n", c.dim("→ details: netscan status --db "+r.db+" --host <IP>"))
 }
 
 func (r *renderer) bar(label string, frac float64, right string) {

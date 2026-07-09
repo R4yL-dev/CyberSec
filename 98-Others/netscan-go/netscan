@@ -150,7 +150,7 @@ cmd_scan() {
 	# --- run: enrichment follows discovery live ---
 	"$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
 	local epid=$!
-	note "live dashboard (autre terminal) ->  netscan status --db $db --interval 2s"
+	note "live dashboard (other terminal) ->  netscan status --db $db --interval 2s"
 
 	local rc=0
 	if [[ $use_syn -eq 1 && $use_guard -eq 1 ]]; then
