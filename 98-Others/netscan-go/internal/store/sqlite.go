@@ -263,8 +263,8 @@ func (s *SQLite) AllHosts(ctx context.Context) ([]*model.HostRecord, error) {
 	for rows.Next() {
 		var (
 			ipStr, portsJSON, dataJSON, statusJSON, ptrJSON, geoJSON string
-			attempts                                                int
-			firstSeen, lastSeen                                     int64
+			attempts                                                 int
+			firstSeen, lastSeen                                      int64
 		)
 		if err := rows.Scan(&ipStr, &portsJSON, &dataJSON, &statusJSON, &ptrJSON, &geoJSON,
 			&attempts, &firstSeen, &lastSeen); err != nil {

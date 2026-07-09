@@ -37,6 +37,7 @@ type WorkItem struct {
 	ID       int64
 	IP       netip.Addr
 	Stage    string
+	State    string // set by FailedItems (claim path leaves it empty)
 	Attempts int
 }
 
@@ -132,6 +133,11 @@ type Store interface {
 	// LiveBlocks groups discovered hosts into /prefixBits blocks and returns those
 	// with at least minHosts hosts (the adaptive scan's pass-2 target list).
 	LiveBlocks(ctx context.Context, prefixBits, minHosts int) ([]netip.Prefix, error)
+
+	// AllHosts enumerates every host record; FailedItems returns failed/leased work
+	// items. Both feed `netscan report` / `diff`.
+	AllHosts(ctx context.Context) ([]*model.HostRecord, error)
+	FailedItems(ctx context.Context) ([]WorkItem, error)
 
 	Close() error
 }
