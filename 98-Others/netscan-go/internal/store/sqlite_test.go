@@ -307,6 +307,14 @@ func TestLiveBlocksAndPortlessIngest(t *testing.T) {
 		t.Fatalf("LiveBlocks(24,2) = %v, want [1.2.3.0/24]", blocks2)
 	}
 
+	// Summary must not choke on portless hosts (open_ports "[]", or legacy "null").
+	if _, err := s.w.ExecContext(ctx, `UPDATE hosts SET open_ports='null' WHERE ip='9.9.9.9'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Summary(ctx); err != nil {
+		t.Fatalf("Summary on a portless/null-open_ports host: %v", err)
+	}
+
 	// /24 blocks with >= 1 host → all three, sorted (portless host counts too).
 	blocks1, err := s.LiveBlocks(ctx, 24, 1)
 	if err != nil {

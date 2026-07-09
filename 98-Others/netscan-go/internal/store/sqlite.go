@@ -143,6 +143,9 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 	default:
 		return err
 	}
+	if merged == nil {
+		merged = []uint16{} // marshal a portless (ICMP-alive) host as "[]", never "null"
+	}
 	ports, err := json.Marshal(merged)
 	if err != nil {
 		return err
