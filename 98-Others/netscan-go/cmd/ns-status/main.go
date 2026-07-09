@@ -210,39 +210,45 @@ func (r *renderer) enrichmentBar(sm store.Summary, now time.Time, done, remainin
 	r.bar("enrichment", frac, right)
 }
 
-// queueLine shows where enrichment work is sitting, per palier (pending, with a
-// ▸ marker for leased/in-flight) plus a failed total.
-func (r *renderer) queueLine(sm store.Summary, failed int64) {
-	order := []string{"detect", "webinfo", "crawl", "tls-deep", "portscan", "ptr"}
+// stageOrder is the fixed display order for per-palier work lines.
+var stageOrder = []string{"detect", "webinfo", "crawl", "tls-deep", "portscan", "ptr"}
+
+// stageCounts returns "stage N" parts for every palier holding items in the
+// given work state, in the fixed order (custom stages appended after).
+func (r *renderer) stageCounts(sm store.Summary, state string) []string {
 	seen := map[string]bool{}
 	var parts []string
 	add := func(stg string) {
-		m := sm.QueueByStage[stg]
-		p := m[store.StatePending]
-		l := m[store.StateLeased]
-		if p == 0 && l == 0 {
-			return
+		if n := sm.QueueByStage[stg][state]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", stg, n))
 		}
-		s := fmt.Sprintf("%s %d", stg, p)
-		if l > 0 {
-			s += "▸"
-		}
-		parts = append(parts, s)
 	}
-	for _, stg := range order {
+	for _, stg := range stageOrder {
 		seen[stg] = true
 		add(stg)
 	}
-	for stg := range sm.QueueByStage { // any custom stages not in the fixed order
+	for stg := range sm.QueueByStage {
 		if !seen[stg] {
 			add(stg)
 		}
 	}
-	if failed > 0 {
-		parts = append(parts, r.col.red(fmt.Sprintf("failed %d", failed)))
+	return parts
+}
+
+// workLines shows enrichment work per palier: what is executing now (running =
+// leased/in-flight), what is waiting (queue = pending), and the failed total.
+func (r *renderer) workLines(sm store.Summary, failed int64) {
+	line := func(label, val string) {
+		fmt.Printf("  %s %s\n", r.col.dim(fmt.Sprintf("%-7s", label)), val)
 	}
-	if len(parts) > 0 {
-		fmt.Printf("  %s  %s\n", r.col.dim("queue"), strings.Join(parts, " · "))
+	if p := r.stageCounts(sm, store.StateLeased); len(p) > 0 {
+		line("running", strings.Join(p, " · "))
+	}
+	if p := r.stageCounts(sm, store.StatePending); len(p) > 0 {
+		line("queue", strings.Join(p, " · "))
+	}
+	if failed > 0 {
+		line("failed", r.col.red(fmt.Sprintf("%d", failed)))
 	}
 }
 
