@@ -206,6 +206,9 @@ func (s *Space) Signature() string {
 	for _, e := range s.excludes {
 		fmt.Fprintf(h, "x:%s;", e.String())
 	}
+	for _, w := range s.within {
+		fmt.Fprintf(h, "w:%s;", w.String())
+	}
 	fmt.Fprintf(h, "r:%v", s.skipReserved)
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -44,6 +44,7 @@ func main() {
 		targetsFlag = flag.String("targets", "", "comma-separated CIDRs, or @file (one per line)")
 		excludeFlag = flag.String("exclude", "", "comma-separated CIDRs to exclude")
 		excludeFile = flag.String("exclude-file", "", "file of CIDRs to exclude (one per line)")
+		withinFlag  = flag.String("within", "", "allowlist CIDRs, or @file: only scan addresses inside these (intersected with --targets — keeps a derived sweep in scope)")
 		noReserved  = flag.Bool("no-skip-reserved", false, "do NOT skip reserved/private ranges")
 		portsFlag   = flag.String("ports", "", "ports to scan: list/ranges like 80,443,8000-8100 or 'all' (overrides --top-ports)")
 		topPorts    = flag.Int("top-ports", 100, "scan the N most common ports (used unless --ports is given)")
