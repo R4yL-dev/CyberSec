@@ -242,16 +242,17 @@ cmd_scan() {
 			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	else
 		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep; the
-		# intermediate ingest keeps the --follow enricher alive for pass 2.
-		{
-			run_sweep broad --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}"
-			# ICMP liveness sweep only when privileged; if/fi so a connect-mode run
-			# doesn't leave the block with a false (non-zero) exit → pipefail → rc.
+		# intermediate ingest keeps the --follow enricher alive for pass 2. A
+		# subshell with `|| exit $?` propagates a sweep's exit code (e.g. 130 on
+		# interrupt) to the pipe — a plain { } block would return its trailing
+		# command's status and mask it.
+		(
+			run_sweep broad --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" || exit $?
 			if [[ $use_syn -eq 1 ]]; then
 				"$BIN/ns-discover" --mode icmp --label ping --db "$db" \
-					--targets "$tgt_csv" "${excl[@]}" "${tune[@]}"
+					--targets "$tgt_csv" "${excl[@]}" "${tune[@]}" || exit $?
 			fi
-		} | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+		) | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 		[[ $rc -eq 130 ]] && _scan_abort   # interrupted → don't start pass 2
 
 		# Derive live /24 blocks and widen ports on them (or finalize if none).
