@@ -153,7 +153,7 @@ func (r *renderer) render(sm store.Summary, ph phase, started time.Time) {
 	} else {
 		r.discoveryBar(sm, ph, now)
 		r.enrichmentBar(sm, now, done, pending+leased)
-		r.queueLine(sm, failed)
+		r.workLines(sm, failed)
 	}
 
 	r.findings(sm)
