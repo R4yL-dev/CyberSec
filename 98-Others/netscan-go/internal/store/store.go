@@ -129,5 +129,9 @@ type Store interface {
 	// Summary returns a monitoring snapshot (queue progress + findings).
 	Summary(ctx context.Context) (Summary, error)
 
+	// LiveBlocks groups discovered hosts into /prefixBits blocks and returns those
+	// with at least minHosts hosts (the adaptive scan's pass-2 target list).
+	LiveBlocks(ctx context.Context, prefixBits, minHosts int) ([]netip.Prefix, error)
+
 	Close() error
 }

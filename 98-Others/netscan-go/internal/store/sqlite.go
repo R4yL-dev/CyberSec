@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -158,11 +159,16 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 		rec.IP.String(), string(ports), geoJSON, now, now); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO work(ip, stage, state, attempts, available_at)
-		VALUES(?, ?, 'pending', 0, ?)`,
-		rec.IP.String(), stage, now); err != nil {
-		return err
+	// Only enqueue enrichment for a host with known open ports. A portless record
+	// (an ICMP-alive host from the adaptive pass-1 liveness sweep) just refreshes
+	// the row for live-block selection; pass 2 upgrades it if it finds real ports.
+	if len(merged) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO work(ip, stage, state, attempts, available_at)
+			VALUES(?, ?, 'pending', 0, ?)`,
+			rec.IP.String(), stage, now); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -442,6 +448,42 @@ func (s *SQLite) Summary(ctx context.Context) (Summary, error) {
 		return sm, err
 	}
 	return sm, nil
+}
+
+// LiveBlocks groups every discovered host into its /prefixBits block and returns
+// the blocks holding at least minHosts hosts, sorted. Used by the adaptive scan
+// to build the pass-2 target list (widen ports only where there's life).
+func (s *SQLite) LiveBlocks(ctx context.Context, prefixBits, minHosts int) ([]netip.Prefix, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT ip FROM hosts`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[netip.Prefix]int{}
+	for rows.Next() {
+		var ipStr string
+		if err := rows.Scan(&ipStr); err != nil {
+			return nil, err
+		}
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		counts[netip.PrefixFrom(addr, prefixBits).Masked()]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var out []netip.Prefix
+	for pfx, n := range counts {
+		if n >= minHosts {
+			out = append(out, pfx)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Addr().Less(out[j].Addr()) })
+	return out, nil
 }
 
 // scanQueueByStage fills dst[stage][state] = count over the whole work table.
