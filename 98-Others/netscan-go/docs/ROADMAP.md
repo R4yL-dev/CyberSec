@@ -139,9 +139,9 @@ enumerated them — SYN here finds *more ports*, never more machines):
   of fds/ephemeral ports under heavy concurrency; SYN doesn't hit that ceiling.
 - **Stealthier**: half-open connections are less often logged by application services.
 
-Cost (why connect is v1): raw sockets + `CAP_NET_RAW` + the iptables RST guard would move into
-`ns-enrich` (today fully unprivileged), plus SYN-ACK↔port pairing per host and a receive loop.
-Connect stays the default/fallback for the no-privilege path; SYN would be opt-in when capable.
+Why it did **not** go into `ns-enrich` (the naive approach): raw sockets + `CAP_NET_RAW` + the RST
+guard + per-host pcap in 50 workers, and it breaks the privilege separation (enrichment is dropped to
+`$SUDO_USER` under sudo). Framing "find open ports" as **discovery** avoided all of that.
 
 **Remaining:** `recheck`, and a selector **expression DSL** if named selectors fall short.
 
