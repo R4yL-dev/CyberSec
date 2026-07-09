@@ -17,36 +17,75 @@ import (
 var versionRe = regexp.MustCompile(`\d+(?:\.\d+)+\w*`)
 
 // cpeVendorProduct maps a lowercased product name to its CPE "vendor:product".
-// Small and curated; extend as needed. Unknown products get no CPE.
+// Curated best-effort — the strings should be validated against the official NVD
+// CPE dictionary before they drive CVE matching (the deferred CVE step); a wrong
+// mapping just fails to match, it never invents a vuln. Unknown products get no CPE.
 var cpeVendorProduct = map[string]string{
+	// web servers / proxies
 	"nginx":         "nginx:nginx",
 	"apache":        "apache:http_server",
 	"httpd":         "apache:http_server",
 	"iis":           "microsoft:iis",
 	"microsoft-iis": "microsoft:iis",
 	"openresty":     "openresty:openresty",
-	"php":           "php:php",
-	"asp.net":       "microsoft:asp.net",
-	"express":       "expressjs:express",
-	"openssh":       "openbsd:openssh",
+	"lighttpd":      "lighttpd:lighttpd",
+	"caddy":         "caddyserver:caddy",
+	"traefik":       "traefik:traefik",
+	"haproxy":       "haproxy:haproxy",
+	"litespeed":     "litespeedtech:litespeed_web_server",
+	"cherokee":      "cherokee-project:cherokee",
+	// app servers / runtimes / frameworks
+	"php":       "php:php",
+	"asp.net":   "microsoft:asp.net",
+	"express":   "expressjs:express",
+	"python":    "python:python",
+	"node.js":   "nodejs:node.js",
+	"tomcat":    "apache:tomcat",
+	"jetty":     "eclipse:jetty",
+	"gunicorn":  "gunicorn:gunicorn",
+	"tornado":   "tornadoweb:tornado",
+	"werkzeug":  "palletsprojects:werkzeug",
+	"coldfusion": "adobe:coldfusion",
+	"weblogic":  "oracle:weblogic_server",
+	"websphere": "ibm:websphere_application_server",
+	"wildfly":   "redhat:wildfly",
+	"glassfish": "oracle:glassfish_server",
+	// apps / CMS / tooling (Server / generator / signatures)
 	"wordpress":     "wordpress:wordpress",
 	"drupal":        "drupal:drupal",
 	"joomla":        "joomla:joomla",
-	"tomcat":        "apache:tomcat",
-	"jetty":         "eclipse:jetty",
-	"lighttpd":      "lighttpd:lighttpd",
-	"python":        "python:python",
-	"node.js":       "nodejs:node.js",
-	// non-web services (banner grab)
+	"gitlab":        "gitlab:gitlab",
+	"jenkins":       "jenkins:jenkins",
+	"grafana":       "grafana:grafana",
+	"kibana":        "elastic:kibana",
+	"elasticsearch": "elastic:elasticsearch",
+	"minio":         "minio:minio",
+	// databases / caches / queues
+	"mysql":     "oracle:mysql",
+	"mariadb":   "mariadb:mariadb",
+	"redis":     "redis:redis",
+	"mongodb":   "mongodb:mongodb",
+	"postgresql": "postgresql:postgresql",
+	"memcached": "memcached:memcached",
+	// mail / ftp (banner grab)
+	"openssh":  "openbsd:openssh",
 	"postfix":  "postfix:postfix",
 	"exim":     "exim:exim",
 	"sendmail": "proofpoint:sendmail",
-	"mysql":    "oracle:mysql",
-	"mariadb":  "mariadb:mariadb",
-	"redis":    "redis:redis",
 	"proftpd":  "proftpd:proftpd",
 	"vsftpd":   "vsftpd:vsftpd",
+	"pure-ftpd": "pureftpd:pure-ftpd",
 	"dovecot":  "dovecot:dovecot",
+	"courier":  "courier-mta:courier",
+	// apps (header signatures)
+	"confluence": "atlassian:confluence",
+	// network gear / appliances / IoT
+	"routeros": "mikrotik:routeros",
+	"mikrotik": "mikrotik:routeros",
+	"fortios":  "fortinet:fortios",
+	// remote access
+	"tigervnc": "tigervnc:tigervnc",
+	"realvnc":  "realvnc:vnc",
 }
 
 // parseVersionToken splits a token like "nginx/1.18.0 (Ubuntu)" or "PHP/8.2.1"
@@ -123,5 +162,32 @@ func extractServices(headers map[string]string, body []byte) []model.Service {
 		v := versionRe.FindString(gen)
 		add(p, v, "generator")
 	}
+	// Product-revealing headers that don't use Server/X-Powered-By. Presence alone
+	// (needle == "") is the signal; the header value often carries the version.
+	for _, sig := range httpHeaderSigs {
+		val := headerGet(headers, sig.header)
+		if val == "" {
+			continue
+		}
+		if sig.needle != "" && !strings.Contains(strings.ToLower(val), sig.needle) {
+			continue
+		}
+		add(sig.product, versionRe.FindString(val), "http-header:"+sig.header)
+	}
 	return out
+}
+
+// httpHeaderSigs are high-signal product markers in headers other than Server /
+// X-Powered-By / generator. needle "" means "presence of the header is enough".
+var httpHeaderSigs = []struct{ header, needle, product string }{
+	{"X-Jenkins", "", "jenkins"},                 // value = Jenkins version
+	{"X-Drupal-Cache", "", "drupal"},
+	{"X-Drupal-Dynamic-Cache", "", "drupal"},
+	{"X-Generator", "drupal", "drupal"},
+	{"X-Kibana-Version", "", "kibana"},           // value = Kibana version
+	{"kbn-name", "", "kibana"},
+	{"X-Confluence-Request-Time", "", "confluence"},
+	{"WWW-Authenticate", "tomcat", "tomcat"},
+	{"WWW-Authenticate", "jenkins", "jenkins"},
+	{"WWW-Authenticate", "gitlab", "gitlab"},
 }
