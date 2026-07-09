@@ -1,0 +1,108 @@
+====================================================================
+netscan analysis · 20260709-182707
+====================================================================
+targets : 195.202.193.0/26
+extra   : (none)
+host    : Linux kali 7.0.12+kali-amd64 #1 SMP PREEMPT_DYNAMIC Kali 7.0.12-2kali1 (2026-06-18) x86_64 GNU/Linux
+getcap  : /home/luca/CyberSec/98-Others/netscan-go/bin/ns-discover cap_net_admin,cap_net_raw=eip  · uid=1000
+commit  : f05d7c3 (dirty)
+
+#################### RUN LOG — full SYN scan ####################
+$ netscan scan --syn --targets 195.202.193.0/26  --db syn.db
+
+netscan: mode: SYN+ping (setcap) · adaptive · db=ns-analysis-20260709-182707/syn.db
+netscan: live dashboard (other terminal) ->  netscan status --db ns-analysis-20260709-182707/syn.db --interval 2s
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 45227)
+[*] ns-enrich stages=tls-deep,ptr,detect,webinfo,crawl workers=50 (drain=false follow=true)
+[*] syn     : src-port=45227 (scope iptables RST rule to this port)
+[*] targets : 64 addresses (seed=6641540881252150648)
+[*] ports   : 100 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 6 host(s) found | 6.4k probes in 9s (~680 pps)
+    details: ns-status --db ns-analysis-20260709-182707/syn.db
+syn-scan: removed iptables RST guard (sport 45227)
+[*] icmp    : echo liveness sweep
+[*] targets : 64 addresses (seed=14250146370640063297)
+[*] ports   : 100 port(s) | mode=icmp | rate=1000 pps | workers=-1
+[+] 57 host(s) found | 64 probes in 3s (~20 pps)
+    details: ns-status --db ns-analysis-20260709-182707/syn.db
+[+] ingested 63 host(s)
+netscan: adaptive: widening 1 live /24 block(s)
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 50160)
+[*] syn     : src-port=50160 (scope iptables RST rule to this port)
+[*] targets : 256 addresses (seed=17791695226849044146)
+[*] ports   : 115 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 6 host(s) found | 7.4k probes in 10s (~713 pps)
+    details: ns-status --db ns-analysis-20260709-182707/syn.db
+syn-scan: removed iptables RST guard (sport 50160)
+[+] ingested 6 host(s)
+[*] geoip   : enabled
+[+] ingested 0 host(s)
+[+] enriched 15 item(s)
+
+netscan · syn.db · 18:27:31 · elapsed 23s
+
+✓ SCAN COMPLETE · 59 hosts · 23s
+
+HOSTS 59
+  ports  443(2) 21(1) 80(1) 5000(1) 8443(1)
+  proto  https 3 · http 2 · ftp 1
+  web    5 srv · tls 3 · crawl 6 sensitive
+  geo    CH 59
+  latest 
+    195.202.193.33  8443
+    195.202.193.22  21,443
+    195.202.193.27  80,443,5000
+    195.202.193.8   
+    195.202.193.29  
+  → details: netscan status --db syn.db --host <IP>
+
+#################### REPORT — full SYN scan ####################
+
+===== netscan report · syn.db · 2026-07-09 18:27:50 =====
+
+## overview
+  elapsed        43s
+  ingest.state   done
+  hosts          59
+  ns-discover    counter=7360 total=29440 · widening 1 blocks · found=6
+  ns-ingest      counter=0
+  ns-enrich      counter=15
+
+## queue (stage × state)
+  crawl     done=3
+  detect    done=3
+  ptr       done=3
+  tls-deep  done=3
+  webinfo   done=3
+  failed=0  leased(in-flight/stuck)=0
+
+## hosts: 59 total · 3 with ports · 56 ping-only
+  195.202.193.22  ports=21,443 proto=ftp,https services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-22.dynamic.hispeed.ch CH/AS6730
+  195.202.193.27  ports=80,443,5000 proto=http,https,http services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-27.dynamic.hispeed.ch CH/AS6730
+  195.202.193.33  ports=8443 proto=https services=httpd/3.0 stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-33.dynamic.hispeed.ch CH/AS6730
+  ping-only (56): 195.202.193.1 195.202.193.10 195.202.193.11 195.202.193.12 195.202.193.13 195.202.193.14 195.202.193.15 195.202.193.16 195.202.193.17 195.202.193.18 195.202.193.19 195.202.193.20 195.202.193.21 195.202.193.23 195.202.193.24 195.202.193.25 195.202.193.26 195.202.193.28 195.202.193.29 195.202.193.3 … +36
+
+## findings
+  ports    443(2) 21(1) 80(1) 5000(1) 8443(1)
+  proto    https 3 · http 2 · ftp 1
+  web      5 srv · tls 3 (0 expired, 0 weak) · crawl 6 sensitive
+  geo      CH 59
+
+## anomalies (1)
+  ! 56 ping-only host(s) with no open ports (expected if serviceless or pending deep scan)
+
+#################### DIFF — SYN --fast (A) vs connect --fast (B) ####################
+# A-only = SYN found, connect didn't (SYN reliability wins — good)
+# B-only = connect found, SYN MISSED  (potential false negative — the concern)
+
+===== netscan diff · A=ns-analysis-20260709-182707/synfast.db · B=ns-analysis-20260709-182707/connfast.db =====
+A: 3 hosts · B: 3 hosts
+
+## hosts only in A (0)
+
+## hosts only in B (0)
+
+## port differences (common hosts)
+  (none — common hosts have identical ports)
