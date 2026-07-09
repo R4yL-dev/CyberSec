@@ -22,8 +22,8 @@ import (
 	"syscall"
 	"time"
 
-	"netscan/internal/enrich"
 	"netscan/internal/pipeline"
+	"netscan/internal/ports"
 	"netscan/internal/store"
 )
 
@@ -205,7 +205,7 @@ func loadPipeline(path string, opts pipeline.Options) (pipeline.Pipeline, error)
 func parsePortSpec(spec string) ([]uint16, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return enrich.CommonPorts(), nil
+		return ports.Common(), nil
 	}
 	if spec == "all" {
 		out := make([]uint16, 0, 65535)

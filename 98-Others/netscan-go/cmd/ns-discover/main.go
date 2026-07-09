@@ -84,7 +84,7 @@ func main() {
 		}
 		ports = p
 	} else {
-		common := enrich.CommonPorts()
+		common := ports.Common()
 		n := *topPorts
 		if n <= 0 || n > len(common) {
 			n = len(common)
