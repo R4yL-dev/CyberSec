@@ -2,6 +2,7 @@ package enrich
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -11,6 +12,47 @@ import (
 
 	"netscan/internal/model"
 )
+
+// TestCrawlBoundedOnSlowHost: a tarpit that accepts connections but never
+// responds must not turn the crawl into minutes of sequential timeouts — probes
+// run concurrently, so the whole crawl costs only a few round-trips.
+func TestCrawlBoundedOnSlowHost(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) { <-done; c.Close() }(conn) // hold, never respond
+		}
+	}()
+
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+	host := &model.HostRecord{
+		IP:        netip.MustParseAddr("127.0.0.1"),
+		OpenPorts: []uint16{port},
+		Ports:     map[uint16]*model.PortInfo{port: {Port: port, Protocol: model.ProtoHTTP}},
+	}
+
+	timeout := 250 * time.Millisecond
+	start := time.Now()
+	if err := NewCrawl(timeout).Enrich(context.Background(), host); err != nil {
+		t.Fatal(err)
+	}
+	// Sequential (the old behaviour) would be ~16×timeout (~4s); concurrent probes
+	// bound it to a handful of round-trips. 8×timeout (2s) is a generous ceiling
+	// that still fails the old code.
+	if elapsed := time.Since(start); elapsed > 8*timeout {
+		t.Fatalf("crawl took %v on a tarpit host, want <= %v (probes must run concurrently)", elapsed, 8*timeout)
+	}
+}
 
 // TestCrawlBlanketResponseFiltered: a server that answers every path with the
 // same 403 (like Cloudflare) must yield no "found" paths — the baseline catches it.
