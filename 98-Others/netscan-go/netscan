@@ -29,7 +29,8 @@ discovers hosts broadly (SYN top-100 common ports + an ICMP ping sweep when
 privileged), then pass 2 re-scans only the live /24 blocks with a wider port set
 (top-1000) to catch hosts on uncommon ports — then fully enriches everything
 (protocol detection, HTTP + TLS on web, banner on non-web, reverse DNS).
-Use --fast for a single quick pass. SYN needs root/sudo or `make setcap`.
+For a fast scan, run with **sudo** (SYN + ICMP ping); without sudo it uses connect
+(slower, no ping). Advanced: `make setcap` enables SYN without sudo. --fast = single pass.
 
 SCAN OPTIONS
   Targets:
@@ -43,8 +44,8 @@ SCAN OPTIONS
     --widen-min-hosts N           only widen /24s with >= N live hosts (default 1)
     --ports LIST | --top-ports N  pass-1 ports (default: top 100); LIST is
                                   80,443,8000-8100 or 'all' (mutually excl.)
-    --syn / --connect             force the method (default: auto — SYN if root/sudo
-                                  or the binary has CAP_NET_RAW, else connect)
+    --syn / --connect             force the method (default: auto — SYN when run
+                                  with sudo, else connect; 'make setcap' also enables SYN)
     --rate N                      max probes/sec (default 1000; 0 = unlimited)
     --timeout DUR                 per-probe timeout (discovery)
     --workers N                   discovery concurrency
@@ -179,7 +180,7 @@ cmd_scan() {
 	local use_syn=0 use_guard=0 can_syn=0
 	{ is_root || has_cap; } && can_syn=1
 	case "$method" in
-		syn)     [[ $can_syn -eq 1 ]] || die "SYN needs root/sudo or CAP_NET_RAW ('make setcap') — or use --connect"; use_syn=1 ;;
+		syn)     [[ $can_syn -eq 1 ]] || die "SYN needs sudo (run 'sudo netscan scan …'), or 'make setcap' — or use --connect"; use_syn=1 ;;
 		connect) use_syn=0 ;;
 		auto)    [[ $can_syn -eq 1 ]] && use_syn=1 ;;
 	esac
