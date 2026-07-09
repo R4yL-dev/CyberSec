@@ -349,6 +349,23 @@ func printHost(ctx context.Context, st *store.SQLite, ipStr string) {
 	fmt.Println(string(out))
 }
 
+// printLiveBlocks emits the live /prefixBits blocks as CIDRs, one per line —
+// the machine-readable pass-2 target list for the adaptive scan (@file intake).
+func printLiveBlocks(ctx context.Context, st *store.SQLite, prefixBits, minHosts int) {
+	if prefixBits < 1 || prefixBits > 32 {
+		fmt.Fprintf(os.Stderr, "ns-status: --live-blocks must be 1..32\n")
+		os.Exit(1)
+	}
+	blocks, err := st.LiveBlocks(ctx, prefixBits, minHosts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ns-status: live-blocks: %v\n", err)
+		os.Exit(1)
+	}
+	for _, b := range blocks {
+		fmt.Println(b.String())
+	}
+}
+
 func readStarted(ctx context.Context, st *store.SQLite) time.Time {
 	v, _ := st.GetMeta(ctx, store.MetaScanStarted)
 	if v == "" {
