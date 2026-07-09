@@ -18,7 +18,6 @@ import (
 	"math"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -45,7 +44,7 @@ func main() {
 		excludeFlag = flag.String("exclude", "", "comma-separated CIDRs to exclude")
 		excludeFile = flag.String("exclude-file", "", "file of CIDRs to exclude (one per line)")
 		noReserved  = flag.Bool("no-skip-reserved", false, "do NOT skip reserved/private ranges")
-		portsFlag   = flag.String("ports", "", "comma-separated ports (overrides --top-ports)")
+		portsFlag   = flag.String("ports", "", "ports to scan: list/ranges like 80,443,8000-8100 or 'all' (overrides --top-ports)")
 		topPorts    = flag.Int("top-ports", 100, "scan the N most common ports (used unless --ports is given)")
 		mode        = flag.String("mode", "connect", "discovery mode: connect|syn")
 		ratePPS     = flag.Float64("rate", 1000, "max probes per second (0 = unlimited)")
@@ -78,7 +77,7 @@ func main() {
 	// --ports (explicit) wins; otherwise scan the N most common ports.
 	var ports []uint16
 	if *portsFlag != "" {
-		p, perr := parsePorts(*portsFlag)
+		p, perr := commonports.Parse(*portsFlag)
 		if perr != nil {
 			fatal("%v", perr)
 		}
@@ -518,21 +517,6 @@ func parseList(s string) []string {
 		}
 	}
 	return out
-}
-
-func parsePorts(s string) ([]uint16, error) {
-	var ports []uint16
-	for _, part := range parseList(s) {
-		n, err := strconv.Atoi(part)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("invalid port %q", part)
-		}
-		ports = append(ports, uint16(n))
-	}
-	if len(ports) == 0 {
-		return nil, fmt.Errorf("no valid port provided")
-	}
-	return ports, nil
 }
 
 func readLines(path string) ([]string, error) {
