@@ -58,6 +58,8 @@ SCAN OPTIONS
                                   bare = common set, 'all' = 1-65535, or a spec.
                                   SYN when privileged (fast, throttled by --rate),
                                   else connect. Includes ping-only hosts.
+                                  'all' is big (hosts x 65535) — raise --rate (e.g.
+                                  --rate 8000) so the SYN deep sweep isn't slow.
     --all-ports-timeout DUR       connect-mode per-port sweep timeout (default 2s)
     --all-ports-conc N            connect-mode global cap on simultaneous sweep
                                   connects (default 500). SYN mode uses --rate.
