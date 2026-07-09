@@ -98,7 +98,11 @@ cmd_scan() {
 	local ports_set=0 topports_set=0
 	local all_ports="" all_ports_set=0
 	local pipeline_file=""
-	local disc=() geo=() geo_set=0 enrich=()
+	local fast=0 widen_ports="1000" widen_min_hosts="1"
+	# Discovery args are split so the adaptive pass 2 can reuse the tuning/excludes
+	# but swap the targets and port set: tgt (address space), excl (exclusions),
+	# tune (rate/timeout/workers/…), p1ports (pass-1 ports).
+	local tgt=() excl=() tune=() p1ports=() geo=() geo_set=0 enrich=()
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
@@ -108,12 +112,26 @@ cmd_scan() {
 			# method
 			--syn) method="syn"; syn_set=1; shift ;;
 			--connect) method="connect"; connect_set=1; shift ;;
-			# discovery (forwarded to ns-discover)
-			--ports|--ports=*) ports_set=1; disc+=("$1"); [[ "$1" == "--ports" ]] && { disc+=("$2"); shift; }; shift ;;
-			--top-ports|--top-ports=*) topports_set=1; disc+=("$1"); [[ "$1" == "--top-ports" ]] && { disc+=("$2"); shift; }; shift ;;
-			--targets|--exclude|--exclude-file|--rate|--timeout|--workers|--seed) disc+=("$1" "$2"); shift 2 ;;
-			--targets=*|--exclude=*|--exclude-file=*|--rate=*|--timeout=*|--workers=*|--seed=*) disc+=("$1"); shift ;;
-			--no-skip-reserved|--resume|--progress|--yes) disc+=("$1"); shift ;;
+			# adaptive discovery
+			--fast|--no-adaptive) fast=1; shift ;;
+			--widen-ports) widen_ports="$2"; shift 2 ;;
+			--widen-ports=*) widen_ports="${1#*=}"; shift ;;
+			--widen-min-hosts) widen_min_hosts="$2"; shift 2 ;;
+			--widen-min-hosts=*) widen_min_hosts="${1#*=}"; shift ;;
+			# discovery ports (pass 1)
+			--ports) ports_set=1; p1ports+=(--ports "$2"); shift 2 ;;
+			--ports=*) ports_set=1; p1ports+=("$1"); shift ;;
+			--top-ports) topports_set=1; p1ports+=(--top-ports "$2"); shift 2 ;;
+			--top-ports=*) topports_set=1; p1ports+=("$1"); shift ;;
+			# discovery targets / exclusions
+			--targets) tgt+=("$2"); shift 2 ;;
+			--targets=*) tgt+=("${1#*=}"); shift ;;
+			--exclude|--exclude-file) excl+=("$1" "$2"); shift 2 ;;
+			--exclude=*|--exclude-file=*) excl+=("$1"); shift ;;
+			# discovery tuning (shared by both passes)
+			--rate|--timeout|--workers|--seed) tune+=("$1" "$2"); shift 2 ;;
+			--rate=*|--timeout=*|--workers=*|--seed=*) tune+=("$1"); shift ;;
+			--no-skip-reserved|--resume|--progress|--yes) tune+=("$1"); shift ;;
 			# enrichment (forwarded to ns-enrich)
 			--all-ports) all_ports_set=1; all_ports="common"
 				if [[ "${2-}" != "" && "${2-}" != --* ]]; then all_ports="$2"; shift; fi; shift ;;
@@ -132,7 +150,7 @@ cmd_scan() {
 			--geoip|--asn) geo+=("$1" "$2"); geo_set=1; shift 2 ;;
 			--geoip=*|--asn=*) geo+=("$1"); geo_set=1; shift ;;
 			-*) die "unknown scan flag '$1' (see 'netscan scan --help')" ;;
-			*) disc+=("$1"); shift ;;   # bare targets etc.
+			*) tgt+=("$1"); shift ;;   # bare targets
 		esac
 	done
 
@@ -144,18 +162,31 @@ cmd_scan() {
 		note "warning: --all-ports-timeout/--all-ports-conc have no effect without --all-ports"
 	fi
 
-	need ns-discover; need ns-ingest; need ns-enrich
+	need ns-discover; need ns-ingest; need ns-enrich; need ns-status
 
-	# --- method resolution ---
-	local use_syn=0 use_guard=0
+	# --- method resolution (root/sudo OR setcap → SYN; else connect) ---
+	local use_syn=0 use_guard=0 can_syn=0
+	{ is_root || has_cap; } && can_syn=1
 	case "$method" in
-		syn)     has_cap || die "SYN needs CAP_NET_RAW — run 'make setcap' (or use --connect)"; use_syn=1 ;;
+		syn)     [[ $can_syn -eq 1 ]] || die "SYN needs root/sudo or CAP_NET_RAW ('make setcap') — or use --connect"; use_syn=1 ;;
 		connect) use_syn=0 ;;
-		auto)    if has_cap; then use_syn=1; else note "SYN unavailable (run 'make setcap' for speed) — using connect"; fi ;;
+		auto)    if [[ $can_syn -eq 1 ]]; then use_syn=1; else note "SYN unavailable (run with sudo or 'make setcap') — using connect"; fi ;;
 	esac
+	local disc_mode="connect"
 	if [[ $use_syn -eq 1 ]]; then
+		disc_mode="syn"
 		if passwordless_sudo; then use_guard=1
 		else note "no passwordless sudo → SYN without the iptables RST guard (works, slightly less polite)"; fi
+	fi
+
+	# --- privilege drop: under sudo, keep enrichment unprivileged (it parses
+	#     untrusted remote data); only ns-discover needs root for raw sockets ---
+	local pre=()
+	if is_root && [[ -n "${SUDO_USER:-}" ]]; then
+		pre=(sudo -u "$SUDO_USER")
+		note "enrichment runs as $SUDO_USER (privilege separation); discovery as root"
+	elif is_root; then
+		note "running fully as root (no \$SUDO_USER to drop enrichment to)"
 	fi
 
 	# --- geo: auto-detect data/ unless overridden ---
@@ -167,29 +198,47 @@ cmd_scan() {
 	[[ -n "$pipeline_file" ]] && enrich+=(--pipeline "$pipeline_file")
 
 	# --- run: enrichment follows discovery live ---
-	"$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
+	"${pre[@]}" "$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
 	local epid=$!
 	note "live dashboard (other terminal) ->  netscan status --db $db --interval 2s"
 
 	local rc=0
-	if [[ $use_syn -eq 1 && $use_guard -eq 1 ]]; then
-		"$ROOT/scripts/syn-scan.sh" --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
-	elif [[ $use_syn -eq 1 ]]; then
-		"$BIN/ns-discover" --mode syn --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
+	if [[ $fast -eq 1 ]]; then
+		# Single broad pass (no widening, no ICMP).
+		run_sweep "" "${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
+			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	else
-		"$BIN/ns-discover" --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
+		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep; the
+		# intermediate ingest keeps the --follow enricher alive for pass 2.
+		{
+			run_sweep broad "${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}" "${p1ports[@]}"
+			[[ $use_syn -eq 1 ]] && "$BIN/ns-discover" --mode icmp --label ping --db "$db" \
+				"${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}"
+		} | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+
+		# Derive live /24 blocks and widen ports on them (or finalize if none).
+		local blocks; blocks="$(mktemp)"
+		"$BIN/ns-status" --db "$db" --live-blocks 24 --min-hosts "$widen_min_hosts" >"$blocks" 2>/dev/null || true
+		local n; n="$(grep -c . "$blocks" 2>/dev/null || echo 0)"
+		local widen_args=(--ports "$widen_ports")
+		[[ "$widen_ports" =~ ^[0-9]+$ ]] && widen_args=(--top-ports "$widen_ports")
+		if [[ "$n" -gt 0 ]]; then
+			note "adaptive: widening $n live /24 block(s)"
+			run_sweep "widening $n blocks" --targets "@$blocks" "${excl[@]}" "${tune[@]}" "${widen_args[@]}" \
+				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
+		else
+			note "adaptive: no live blocks to widen"
+			: | "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?  # finalize (marks ingest done)
+		fi
+		rm -f "$blocks"
 	fi
 
 	[[ $rc -ne 0 ]] && kill "$epid" 2>/dev/null || true
 	wait "$epid" 2>/dev/null || true
 
 	# Final summary: a one-shot ns-status renders the completion banner + findings.
-	if [[ -x "$BIN/ns-status" ]]; then
-		echo >&2
-		"$BIN/ns-status" --db "$db" >&2 || true
-	else
-		note "done -> $db  (view: netscan status --db $db)"
-	fi
+	echo >&2
+	"$BIN/ns-status" --db "$db" >&2 || true
 	return $rc
 }
 
