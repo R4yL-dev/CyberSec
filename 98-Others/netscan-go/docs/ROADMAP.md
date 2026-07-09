@@ -293,9 +293,17 @@ space, packet crafting, exclusion lists all differ).
 
 ## 8. Adaptive two-pass discovery — maximise hosts found at reasonable cost
 
-**Status:** not started. Discovery is a single fixed-port-set pass today (`ns-discover`, top-100 by
-default or `--ports`/`--top-ports`). A host silent on that set is never found; `--all-ports` only
-widens ports on **already-discovered** hosts, so it cannot rescue them.
+**Status:** ✅ done — it is the **default** of `netscan scan` (`--fast` reverts to a single pass).
+Pass 1 = SYN top-N broad sweep + an ICMP echo liveness sweep (`ns-discover --mode icmp`,
+`internal/scan/icmp.go`, sharing `internal/scan/raw.go` scaffolding with SYN); ICMP-alive hosts
+ingest portless (`store.Ingest` skips the enqueue when no ports). `store.LiveBlocks` /
+`ns-status --live-blocks 24 --min-hosts M` derive the live /24 target list; pass 2 re-scans it wide
+(`--widen-ports`, default top-1000). Passes share one ingest via `ns-ingest --intermediate` (state
+stays `running` so the `--follow` enricher survives between passes); sweeps are labelled
+(`ns-discover --label`) for the dashboard. SYN trigger is hybrid (root/sudo **or** setcap); under
+sudo, enrichment drops to `$SUDO_USER` (privilege separation preserved). **Remaining/deferred:**
+whole-adaptive resume across passes; ASN-based widening; a distinct dashboard marker for ping-only
+hosts. The design discussion below is kept for context.
 
 **The problem.** Goal: find a maximum of machines while keeping scan time reasonable. No port count
 *proves* a host dead — detection is probabilistic (a host is found iff ≥1 probed port responds).
