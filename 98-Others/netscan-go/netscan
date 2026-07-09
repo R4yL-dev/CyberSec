@@ -121,8 +121,8 @@ cmd_scan() {
 	[[ $syn_set -eq 1 && $connect_set -eq 1 ]] && die "--syn and --connect are mutually exclusive"
 	[[ $ports_set -eq 1 && $topports_set -eq 1 ]] && die "--ports and --top-ports are mutually exclusive"
 	[[ $all_ports_set -eq 1 && -n "$pipeline_file" ]] && die "--all-ports and --pipeline are mutually exclusive"
-	if [[ $all_ports_set -eq 0 ]] && printf '%s\n' "${enrich[@]}" | grep -q -- '--all-ports-timeout'; then
-		note "warning: --all-ports-timeout has no effect without --all-ports"
+	if [[ $all_ports_set -eq 0 && ${#enrich[@]} -gt 0 ]] && printf '%s\n' "${enrich[@]}" | grep -qE -- '--all-ports-(timeout|conc)'; then
+		note "warning: --all-ports-timeout/--all-ports-conc have no effect without --all-ports"
 	fi
 
 	need ns-discover; need ns-ingest; need ns-enrich

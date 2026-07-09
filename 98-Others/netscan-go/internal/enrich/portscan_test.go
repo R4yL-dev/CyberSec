@@ -28,7 +28,7 @@ func TestPortscanFindsAndUnions(t *testing.T) {
 		IP:        netip.MustParseAddr("127.0.0.1"),
 		OpenPorts: []uint16{p1}, // discovery already knew p1
 	}
-	ps := NewPortscan([]uint16{p1, p2, pClosed}, 500*time.Millisecond)
+	ps := NewPortscan([]uint16{p1, p2, pClosed}, 500*time.Millisecond, 0)
 	if err := ps.Enrich(context.Background(), host); err != nil {
 		t.Fatal(err)
 	}
