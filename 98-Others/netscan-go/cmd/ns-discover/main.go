@@ -26,9 +26,9 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"netscan/internal/enrich"
 	"netscan/internal/fmtx"
 	"netscan/internal/model"
+	"netscan/internal/ports"
 	"netscan/internal/scan"
 	"netscan/internal/store"
 	"netscan/internal/stream"
