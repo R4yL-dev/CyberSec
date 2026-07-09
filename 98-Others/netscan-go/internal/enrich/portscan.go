@@ -80,4 +80,3 @@ func (p *Portscan) dial(ctx context.Context, ip netip.Addr, port uint16) bool {
 	_ = conn.Close()
 	return true
 }
-
