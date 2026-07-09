@@ -145,7 +145,7 @@ func (r *renderer) render(sm store.Summary, ph phase, started time.Time) {
 	failed := sm.WorkByState[store.StateFailed]
 
 	if ph == phaseComplete {
-		banner := fmt.Sprintf("✓ SCAN TERMINÉ · %s hosts", fmtx.Count(uint64(sm.Hosts)))
+		banner := fmt.Sprintf("✓ SCAN COMPLETE · %s hosts", fmtx.Count(uint64(sm.Hosts)))
 		if !started.IsZero() {
 			banner += " · " + fmtx.Duration(now.Sub(started))
 		}
