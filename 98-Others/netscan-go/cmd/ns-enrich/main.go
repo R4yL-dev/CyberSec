@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -211,53 +210,13 @@ func loadPipeline(path string, opts pipeline.Options) (pipeline.Pipeline, error)
 	return pipeline.LoadFile(path, opts)
 }
 
-// parsePortSpec turns the --ports-deep value into a port list: "" → the common
-// set, "all" → 1-65535, otherwise a comma list of ports and ranges (e.g.
-// "1-1024,3306,8000-8100").
+// parsePortSpec resolves the --ports-deep value: empty → the common set,
+// otherwise the shared port-spec parser ("all" or a list/ranges).
 func parsePortSpec(spec string) ([]uint16, error) {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
+	if strings.TrimSpace(spec) == "" {
 		return ports.Common(), nil
 	}
-	if spec == "all" {
-		out := make([]uint16, 0, 65535)
-		for p := 1; p <= 65535; p++ {
-			out = append(out, uint16(p))
-		}
-		return out, nil
-	}
-	seen := map[uint16]struct{}{}
-	var out []uint16
-	add := func(p int) {
-		u := uint16(p)
-		if _, ok := seen[u]; !ok {
-			seen[u] = struct{}{}
-			out = append(out, u)
-		}
-	}
-	for _, part := range strings.Split(spec, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if lo, hi, ok := strings.Cut(part, "-"); ok {
-			a, err1 := strconv.Atoi(strings.TrimSpace(lo))
-			b, err2 := strconv.Atoi(strings.TrimSpace(hi))
-			if err1 != nil || err2 != nil || a < 1 || b > 65535 || a > b {
-				return nil, fmt.Errorf("invalid range %q", part)
-			}
-			for p := a; p <= b; p++ {
-				add(p)
-			}
-			continue
-		}
-		p, err := strconv.Atoi(part)
-		if err != nil || p < 1 || p > 65535 {
-			return nil, fmt.Errorf("invalid port %q", part)
-		}
-		add(p)
-	}
-	return out, nil
+	return ports.Parse(spec)
 }
 
 func writeHeartbeat(ctx context.Context, st *store.SQLite, counter int64) {
