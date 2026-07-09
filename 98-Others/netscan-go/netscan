@@ -21,6 +21,8 @@ netscan — internet-scale port scanner (netscan-go)
 USAGE
   netscan scan --targets CIDR[,CIDR|@file] [options]
   netscan status [--db FILE] [--host IP] [--interval DUR]
+  netscan report --db FILE                    # full text diagnostic (for analysis)
+  netscan diff --db A.db --db B.db            # compare two scans (e.g. SYN vs connect)
   netscan discover|ingest|enrich [flags...]   # raw binaries (advanced/scripting)
   netscan iptables-clean                      # remove leftover SYN RST guards
 
