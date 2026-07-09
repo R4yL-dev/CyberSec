@@ -344,6 +344,8 @@ main() {
 	case "$cmd" in
 		scan)           cmd_scan "$@" ;;
 		status)         need ns-status;   exec "$BIN/ns-status" "$@" ;;
+		report)         need ns-status;   exec "$BIN/ns-status" --report "$@" ;;
+		diff)           cmd_diff "$@" ;;
 		discover)       need ns-discover; exec "$BIN/ns-discover" "$@" ;;
 		ingest)         need ns-ingest;   exec "$BIN/ns-ingest" "$@" ;;
 		enrich)         need ns-enrich;   exec "$BIN/ns-enrich" "$@" ;;
@@ -351,6 +353,22 @@ main() {
 		-h|--help|help) usage 0 ;;
 		*)              die "unknown command '$cmd' (see 'netscan --help')" ;;
 	esac
+}
+
+# cmd_diff compares two scan dbs (false-negative check, e.g. SYN vs connect).
+# Accepts: netscan diff --db A.db --db B.db   (or: netscan diff A.db B.db)
+cmd_diff() {
+	need ns-status
+	local dbs=()
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			--db) dbs+=("$2"); shift 2 ;;
+			--db=*) dbs+=("${1#*=}"); shift ;;
+			*) dbs+=("$1"); shift ;;
+		esac
+	done
+	[[ ${#dbs[@]} -eq 2 ]] || die "usage: netscan diff --db A.db --db B.db  (or: netscan diff A.db B.db)"
+	exec "$BIN/ns-status" --db "${dbs[0]}" --diff "${dbs[1]}"
 }
 
 main "$@"

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -431,6 +430,3 @@ func reportFatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "ns-status: "+format+"\n", args...)
 	os.Exit(1)
 }
-
-// (kept for symmetry with the numeric formatting used elsewhere)
-var _ = strconv.Itoa
