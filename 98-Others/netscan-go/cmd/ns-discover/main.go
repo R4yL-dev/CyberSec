@@ -251,6 +251,10 @@ func main() {
 	encDone := make(chan struct{})
 	go func() {
 		defer close(encDone)
+		// Count DISTINCT hosts, not records: the SYN prober streams one record per
+		// open port, so a plain per-record counter would over-report "N hosts". This
+		// goroutine is the sole writer of `found`, so a local set is enough.
+		seen := make(map[netip.Addr]struct{})
 		for rec := range out {
 			if err := enc.Encode(rec); err != nil {
 				fmt.Fprintf(os.Stderr, "[!] encode: %v\n", err)
@@ -258,7 +262,10 @@ func main() {
 			if err := enc.Flush(); err != nil {
 				fmt.Fprintf(os.Stderr, "[!] flush: %v\n", err)
 			}
-			atomic.AddInt64(&found, 1)
+			if _, dup := seen[rec.IP]; !dup {
+				seen[rec.IP] = struct{}{}
+				atomic.AddInt64(&found, 1)
+			}
 		}
 	}()
 
