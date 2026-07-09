@@ -131,6 +131,12 @@ func classifyBanner(banner string) string {
 	switch {
 	case strings.HasPrefix(banner, "SSH-"):
 		return model.ProtoSSH
+	case strings.HasPrefix(banner, "RFB "): // VNC: "RFB 003.008"
+		return model.ProtoVNC
+	case strings.HasPrefix(banner, "+OK"): // POP3 greeting
+		return model.ProtoPOP3
+	case strings.HasPrefix(banner, "* OK") || strings.HasPrefix(banner, "* PREAUTH"): // IMAP
+		return model.ProtoIMAP
 	case strings.Contains(low, "smtp") || strings.Contains(low, "postfix") ||
 		strings.Contains(low, "exim") || strings.Contains(low, "sendmail"):
 		return model.ProtoSMTP

@@ -44,6 +44,7 @@ var bannerNeedles = []bannerNeedle{
 	{"postfix", "postfix"},
 	{"exim", "exim"},
 	{"sendmail", "sendmail"},
+	{"courier", "courier"},
 	{"dovecot", "dovecot"},
 	{"mariadb", "mariadb"},
 	{"mysql", "mysql"},
@@ -57,6 +58,13 @@ var sshRe = regexp.MustCompile(`^SSH-\d+\.\d+-(\S+)`)
 // parseBanner derives a Service (product+version+CPE) from a raw banner, or nil.
 func parseBanner(raw string) *model.Service {
 	lower := strings.ToLower(raw)
+
+	// VNC greets with "RFB 003.008" — that's the RFB *protocol* version, not a
+	// software version, and the banner names no product. classifyBanner already
+	// tagged it vnc; don't emit a misleading unknown@003.008 service.
+	if strings.HasPrefix(raw, "RFB ") {
+		return nil
+	}
 
 	// SSH: reliable, has its own identification format.
 	if m := sshRe.FindStringSubmatch(raw); m != nil {
