@@ -330,6 +330,36 @@ func TestLiveBlocksAndPortlessIngest(t *testing.T) {
 	}
 }
 
+// TestReingestEnqueuesOnlyOnNewPorts: a later discovery pass (widen/deep) or the
+// ICMP sweep re-reporting a host with the same ports must NOT re-enqueue detect;
+// only genuinely new ports should.
+func TestReingestEnqueuesOnlyOnNewPorts(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	ip := netip.MustParseAddr("7.7.7.7")
+
+	// First sighting with a port → enqueues detect; run it to completion.
+	s.Ingest(ctx, rec("7.7.7.7", 80), model.StageDetect, nil)
+	items, _ := s.Claim(ctx, model.StageDetect, 10, time.Second)
+	if len(items) != 1 {
+		t.Fatalf("first ingest: %d detect item(s), want 1", len(items))
+	}
+	h, _ := s.Host(ctx, ip)
+	s.Complete(ctx, items[0].ID, h)
+
+	// Re-report the SAME port (another pass / the ICMP sweep) → no new detect.
+	s.Ingest(ctx, rec("7.7.7.7", 80), model.StageDetect, nil)
+	if again, _ := s.Claim(ctx, model.StageDetect, 10, time.Second); len(again) != 0 {
+		t.Fatalf("re-ingest, same ports: %d detect item(s), want 0", len(again))
+	}
+
+	// Re-report with a NEW port (the deep sweep found one) → enqueues detect.
+	s.Ingest(ctx, rec("7.7.7.7", 443), model.StageDetect, nil)
+	if again, _ := s.Claim(ctx, model.StageDetect, 10, time.Second); len(again) != 1 {
+		t.Fatalf("re-ingest, new port: %d detect item(s), want 1", len(again))
+	}
+}
+
 func TestLeaseExpiryReclaim(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)

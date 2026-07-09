@@ -164,10 +164,11 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 		rec.IP.String(), string(ports), geoJSON, now, now); err != nil {
 		return err
 	}
-	// Only enqueue enrichment for a host with known open ports. A portless record
-	// (an ICMP-alive host from the adaptive pass-1 liveness sweep) just refreshes
-	// the row for live-block selection; pass 2 upgrades it if it finds real ports.
-	if len(merged) > 0 {
+	// Enqueue enrichment only when this ingest added NEW ports. A later discovery
+	// pass (widen, deep) or the ICMP sweep re-reporting a host with the same ports
+	// must NOT re-run the whole detect→enrich chain; and a portless ICMP-alive
+	// record (no ports at all) just refreshes the row for live-block selection.
+	if len(merged) > prevLen {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO work(ip, stage, state, attempts, available_at)
 			VALUES(?, ?, 'pending', 0, ?)`,
