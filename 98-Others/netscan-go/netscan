@@ -243,11 +243,34 @@ cmd_scan() {
 	# --- interrupt handling: one Ctrl+C stops the WHOLE scan cleanly (kill the
 	#     background enricher, don't march on to the next pass) ---
 	local epid="" aborted=0
+	# _kill_enricher SIGNAL: signal the background enricher. epid is the
+	# `sudo -u $SUDO_USER ns-enrich` wrapper (or ns-enrich directly under setcap).
+	# sudo forwards SIGTERM to its child, but NOT SIGKILL — so also signal the
+	# ns-enrich child directly (the launcher runs as root, so it may) to avoid
+	# leaving an orphaned enricher behind on a force-kill.
+	_kill_enricher() {
+		[[ -n "$epid" ]] || return 0
+		kill -"$1" "$epid" 2>/dev/null || true
+		local kid; kid="$(pgrep -P "$epid" 2>/dev/null || true)"
+		[[ -n "$kid" ]] && kill -"$1" $kid 2>/dev/null || true
+	}
+	_scan_hardkill() {  # second Ctrl+C: don't wait, kill now
+		trap '' INT TERM
+		echo >&2; note "force-quit"
+		_kill_enricher KILL
+		exit 130
+	}
 	_scan_abort() {
 		[[ $aborted -eq 1 ]] && return 0; aborted=1
-		trap '' INT TERM
-		echo >&2; note "interrupted — stopping scan"
-		[[ -n "$epid" ]] && kill -TERM "$epid" 2>/dev/null || true
+		trap _scan_hardkill INT TERM      # a second Ctrl+C now force-quits
+		echo >&2; note "interrupted — stopping scan (Ctrl+C again to force-quit)"
+		_kill_enricher TERM
+		# Bounded graceful wait (~5s) so we never hang on a stuck palier, then
+		# force-kill. With the enricher skipping queued work on shutdown this
+		# normally finishes in well under a second.
+		local i
+		for i in $(seq 1 25); do kill -0 "$epid" 2>/dev/null || break; sleep 0.2; done
+		_kill_enricher KILL
 		wait "$epid" 2>/dev/null || true
 		note "partial results kept in $db  (view: netscan status --db $db  ·  fresh start: rm ${db}*)"
 		exit 130

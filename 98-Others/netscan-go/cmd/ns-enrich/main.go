@@ -98,6 +98,15 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for it := range itemCh {
+				// Shutting down (Ctrl-C / SIGTERM): abandon this already-claimed
+				// item instead of running another network probe. Its lease expires
+				// and a later run reclaims it (re-entrant by design). Without this,
+				// the ~workers items buffered in itemCh would each still be probed
+				// on the way out, stalling the shutdown by a full probe cycle.
+				if ctx.Err() != nil {
+					atomic.AddInt64(&inflight, -1)
+					continue
+				}
 				process(ctx, st, pl, it, *maxAttempts, *backoff, *lease)
 				atomic.AddInt64(&inflight, -1)
 				atomic.AddInt64(&processed, 1)
