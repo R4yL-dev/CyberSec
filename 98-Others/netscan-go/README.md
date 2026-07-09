@@ -322,8 +322,16 @@ edge is gated `has_new_ports`, so no wasteful double-enrichment otherwise; the `
 guard runs portscan once). To widen the *discovery* phase instead, use `--top-ports N` (scan the N
 most common ports across the whole address space). `--all-ports` and `--pipeline` are mutually
 exclusive — wire portscan into your custom graph directly if you need both.
-**`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
-rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
+**`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard), `--host IP`
+(full record as raw JSON), `--no-color` (disable ANSI). The dashboard is **phase-aware** — it reads
+`meta.ingest.state` + queue depth to know whether the scan is *discovering*, *enriching*, or *done*
+— and shows progress bars (discovery %/pps/ETA, enrichment done/remaining/ETA), the work queue **per
+palier** (pending, `▸` = leased/in-flight, plus failed), and a **findings** block aggregated from the
+hosts' enrichment JSON via SQLite JSON1: top ports, protocol mix, web-server count, TLS ports with
+expired/weak-crypto counts, sensitive crawl paths, and geo breakdown. In live mode it refreshes in
+place and **auto-exits with a `✓ SCAN TERMINÉ` banner once complete** (no more infinite loop). Run it
+in a second terminal during a scan (`netscan status --db scan.db --interval 2s`); `netscan scan` also
+prints this summary once at the end.
 **`ns-ingest` flags:** `--db`.
 
 ## How it works
