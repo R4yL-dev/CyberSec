@@ -181,7 +181,7 @@ cmd_scan() {
 	case "$method" in
 		syn)     [[ $can_syn -eq 1 ]] || die "SYN needs root/sudo or CAP_NET_RAW ('make setcap') — or use --connect"; use_syn=1 ;;
 		connect) use_syn=0 ;;
-		auto)    if [[ $can_syn -eq 1 ]]; then use_syn=1; else note "SYN unavailable (run with sudo or 'make setcap') — using connect"; fi ;;
+		auto)    [[ $can_syn -eq 1 ]] && use_syn=1 ;;
 	esac
 	local disc_mode="connect"
 	if [[ $use_syn -eq 1 ]]; then
@@ -192,12 +192,15 @@ cmd_scan() {
 
 	# --- privilege drop: under sudo, keep enrichment unprivileged (it parses
 	#     untrusted remote data); only ns-discover needs root for raw sockets ---
-	local pre=()
-	if is_root && [[ -n "${SUDO_USER:-}" ]]; then
-		pre=(sudo -u "$SUDO_USER")
-		note "enrichment runs as $SUDO_USER (privilege separation); discovery as root"
-	elif is_root; then
-		note "running fully as root (no \$SUDO_USER to drop enrichment to)"
+	local pre=() privstr
+	if [[ $use_syn -eq 1 ]]; then
+		if is_root && [[ -n "${SUDO_USER:-}" ]]; then
+			pre=(sudo -u "$SUDO_USER"); privstr="root, enrichment→$SUDO_USER"
+		elif is_root; then
+			privstr="root (no \$SUDO_USER — enrichment also root)"
+		else
+			privstr="setcap"
+		fi
 	fi
 
 	# --- geo: auto-detect data/ unless overridden ---
@@ -229,6 +232,13 @@ cmd_scan() {
 		exit 130
 	}
 	trap _scan_abort INT TERM
+
+	# --- one clear mode line (instead of scattered notes) ---
+	local modestr scanstr
+	if [[ $use_syn -eq 1 ]]; then modestr="SYN+ping ($privstr)"
+	else modestr="connect (unprivileged — run with sudo, or 'make setcap', for faster SYN+ping)"; fi
+	scanstr="adaptive"; [[ $fast -eq 1 ]] && scanstr="fast (single pass)"
+	note "mode: $modestr · $scanstr · db=$db"
 
 	# --- run: enrichment follows discovery live ---
 	"${pre[@]}" "$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
