@@ -53,6 +53,7 @@ type Space struct {
 	cum          []uint64 // cum[k] = addresses before prefix k; cum[len] = total
 	total        uint64
 	excludes     []netip.Prefix
+	within       []netip.Prefix // optional allowlist: if set, only these are scanned
 	skipReserved bool
 }
 
@@ -79,6 +80,22 @@ func NewSpace(targets, excludes []string, skipReserved bool) (*Space, error) {
 		s.excludes = append(s.excludes, p)
 	}
 	return s, nil
+}
+
+// SetWithin restricts the space to an allowlist of CIDRs: after this, Allowed
+// only passes addresses inside one of them (intersected with the space). Used to
+// clip a derived target list (e.g. the adaptive widen's live /24 blocks) back to
+// the original --targets scope, so a scan never probes outside what was asked.
+func (s *Space) SetWithin(cidrs []string) error {
+	s.within = nil
+	for _, c := range cidrs {
+		p, err := parseV4Prefix(c)
+		if err != nil {
+			return fmt.Errorf("within: %w", err)
+		}
+		s.within = append(s.within, p)
+	}
+	return nil
 }
 
 func parseV4Prefix(s string) (netip.Prefix, error) {
@@ -112,14 +129,27 @@ func (s *Space) AddrAt(i uint64) netip.Addr {
 	return netip.AddrFrom4(b)
 }
 
-// Allowed reports whether addr may be scanned: not reserved (unless disabled)
-// and not inside any user-excluded prefix.
+// Allowed reports whether addr may be scanned: not reserved (unless disabled),
+// not inside any user-excluded prefix, and — when a within allowlist is set —
+// inside one of those prefixes.
 func (s *Space) Allowed(addr netip.Addr) bool {
 	if s.skipReserved && isReserved(addr) {
 		return false
 	}
 	for _, e := range s.excludes {
 		if e.Contains(addr) {
+			return false
+		}
+	}
+	if len(s.within) > 0 {
+		in := false
+		for _, w := range s.within {
+			if w.Contains(addr) {
+				in = true
+				break
+			}
+		}
+		if !in {
 			return false
 		}
 	}
