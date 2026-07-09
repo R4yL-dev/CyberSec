@@ -236,7 +236,9 @@ like `1-1024,3306`. Newly-found ports are re-classified and enriched automatical
 privileged (sudo/root/setcap) it runs as a fast SYN discovery pass throttled by `--rate`; otherwise
 it's the connect `portscan` palier** (bounded by `--all-ports-conc`, default 500, and
 `--all-ports-timeout`, default `2s` — both connect-only). It's the most aggressive part, so it's off
-by default.
+by default. **`--all-ports all` is `hosts × 65535` probes** — at the default `--rate 1000` that's ~1 h
+for ~60 hosts; **raise `--rate` (e.g. `--rate 8000`)** for the SYN deep sweep, which handles high
+rates easily (a few minutes instead).
 
 **Composing the raw binaries** (streaming / long-running enrichment):
 
