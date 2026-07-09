@@ -22,11 +22,14 @@ const (
 )
 
 // Coordination keys/values for the meta table. ns-ingest publishes its state so
-// a following ns-enrich knows when no more work is coming.
+// a following ns-enrich knows when no more work is coming; ns-discover stamps the
+// scan start so ns-status can show elapsed time.
 const (
 	MetaIngestState = "ingest.state"
 	IngestRunning   = "running"
 	IngestDone      = "done"
+
+	MetaScanStarted = "scan.started" // Unix millis, written once by ns-discover
 )
 
 // WorkItem is a claimed unit of work for one host at one stage.
@@ -56,13 +59,37 @@ type HostSummary struct {
 	LastSeen  time.Time
 }
 
-// Stats is a snapshot for ns-status.
-type Stats struct {
-	Hosts          int64
-	WorkByState    map[string]int64
-	PendingByStage map[string]int64
-	Runs           []RunStat
-	RecentHosts    []HostSummary
+// PortCount is a port and the number of hosts exposing it.
+type PortCount struct {
+	Port  uint16
+	Count int64
+}
+
+// LabelCount is a generic label with a count (protocol, country, …).
+type LabelCount struct {
+	Label string
+	Count int64
+}
+
+// Summary is a monitoring snapshot for ns-status: queue progress plus an
+// aggregated view of what the scan has found so far.
+type Summary struct {
+	Hosts       int64
+	WorkByState map[string]int64            // pending / leased / done / failed
+	QueueByStage map[string]map[string]int64 // stage -> state -> count
+	StageCoverage map[string]int64           // stage -> hosts that completed it
+	Runs        []RunStat
+	RecentHosts []HostSummary
+
+	// Findings — aggregated from the hosts' enrichment JSON.
+	TopPorts       []PortCount
+	Protocols      []LabelCount
+	Countries      []LabelCount
+	WebServers     int64 // ports carrying an HTTP response
+	TLSPorts       int64 // ports carrying a TLS cert
+	TLSExpired     int64 // hosts with an expired cert in a chain
+	TLSWeak        int64 // hosts with weak-crypto TLS warnings
+	SensitivePaths int64 // sensitive paths found by the crawl palier
 }
 
 // Store is the persistence + queue contract. A single SQLite implementation is
@@ -99,8 +126,8 @@ type Store interface {
 	SetMeta(ctx context.Context, key, value string) error
 	GetMeta(ctx context.Context, key string) (string, error)
 
-	// Stats returns a snapshot for monitoring.
-	Stats(ctx context.Context) (Stats, error)
+	// Summary returns a monitoring snapshot (queue progress + findings).
+	Summary(ctx context.Context) (Summary, error)
 
 	Close() error
 }
