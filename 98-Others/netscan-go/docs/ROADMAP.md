@@ -291,6 +291,41 @@ space, packet crafting, exclusion lists all differ).
 
 ---
 
+## 8. Adaptive two-pass discovery — maximise hosts found at reasonable cost
+
+**Status:** not started. Discovery is a single fixed-port-set pass today (`ns-discover`, top-100 by
+default or `--ports`/`--top-ports`). A host silent on that set is never found; `--all-ports` only
+widens ports on **already-discovered** hosts, so it cannot rescue them.
+
+**The problem.** Goal: find a maximum of machines while keeping scan time reasonable. No port count
+*proves* a host dead — detection is probabilistic (a host is found iff ≥1 probed port responds).
+Port popularity is a power law: top-100 catches the large majority of hosts with a public service,
+top-1000 ~99%, and the tail is exponentially expensive. Cost is **addresses × ports** (linear in
+ports): a /16 at 1000 pps ≈ 11 min (top-10), ~1.8 h (top-100), ~18 h (top-1000), ~50 days (all).
+Raising N *uniformly* wastes billions of probes on the empty ~99% of the space.
+
+**The idea.** Don't raise N uniformly — **spend the port budget where there's life**:
+- **Pass 1 (wide addresses, narrow ports):** cheap top-N (e.g. top-10/top-100), plus an ICMP-echo
+  liveness probe, across the whole space. Finds obvious hosts *and* reveals which blocks are
+  populated. ICMP rescues "pingable but no common port" hosts → known-alive, flagged for widening.
+- **Pass 2 (narrow addresses, wide ports):** top-1000+ (up to `all`) **only** on blocks that showed
+  any life in pass 1. Because live blocks are a tiny fraction, the address count collapses, so many
+  more ports become affordable exactly where hosts actually are.
+
+**Open design questions (discuss before building).**
+- **Widening unit:** the /24 of a live host? that /24 + neighbours? the whole ASN? This governs the
+  real yield-per-second and needs its own discussion.
+- **"Live block" threshold:** ≥1 responder, or ≥K, to avoid chasing single honeypots.
+- **Mechanism:** pass 2 as a second `ns-discover` invocation fed a target list of live blocks (fits
+  the NDJSON/Unix-stage model, no new domain), vs. an in-prober escalation. Prefer the former —
+  keeps Domain A stateless and re-runnable.
+- **ICMP:** raw ICMP needs `CAP_NET_RAW` (already required for SYN); pairs naturally with SYN mode.
+
+**Done when.** A live-block target list from a cheap pass 1 drives a wider-port pass 2, finding
+materially more hosts than a single top-100 pass at a fraction of a uniform top-1000's cost.
+
+---
+
 ## Decisions already made — do not re-litigate
 
 These were debated and settled this session. Re-opening them wastes effort; change them only with
