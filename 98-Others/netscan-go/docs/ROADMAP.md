@@ -117,8 +117,23 @@ Required: `HostRecord.Merge` + `store.Complete` now union/persist `open_ports`. 
 flows via `pipeline.Options` (typed, from flags — not YAML). `ns-discover --top-ports N` for the
 common-first discovery phase.
 
-**Remaining:** `recheck`, a selector **expression DSL** if named selectors fall short, and a
-**SYN-based** deep scan (would need raw sockets in ns-enrich; connect is the v1 path).
+**Deep scan over SYN** 🔜 planned — the `--all-ports` sweep is connect-based today (unprivileged,
+simple, correct). A SYN variant would keep scanning **the same hosts** (discovery already enumerated
+them — SYN here finds *more ports*, never more machines), but:
+- **Faster**: half-open (SYN → SYN-ACK, no 3rd ACK, no teardown) — a big win on `--all-ports all`
+  (65535 ports/host), the same reason discovery already uses SYN.
+- **Resource-light**: raw sockets bypass the conntrack table and ephemeral-port pool that `connect()`
+  exhausts (the exact pressure `--all-ports-conc` exists to cap), so the sweep could run far more
+  aggressively without destabilising the link.
+- **More reliable at scale**: `connect()` can mark an open port closed when the *local* box runs out
+  of fds/ephemeral ports under heavy concurrency; SYN doesn't hit that ceiling.
+- **Stealthier**: half-open connections are less often logged by application services.
+
+Cost (why connect is v1): raw sockets + `CAP_NET_RAW` + the iptables RST guard would move into
+`ns-enrich` (today fully unprivileged), plus SYN-ACK↔port pairing per host and a receive loop.
+Connect stays the default/fallback for the no-privilege path; SYN would be opt-in when capable.
+
+**Remaining:** `recheck`, and a selector **expression DSL** if named selectors fall short.
 
 ## CVE chain (the end goal — sort/filter hosts by CVE)
 
