@@ -251,6 +251,10 @@ func (r *renderer) findings(sm store.Summary) {
 	c := r.col
 	fmt.Printf("\n%s %s\n", c.bold("HOSTS"), fmtx.Count(uint64(sm.Hosts)))
 
+	row := func(label, val string) { // aligned "  label  value"
+		fmt.Printf("  %s %s\n", c.dim(fmt.Sprintf("%-6s", label)), val)
+	}
+
 	if len(sm.TopPorts) > 0 {
 		var b strings.Builder
 		for i, p := range sm.TopPorts {
@@ -259,10 +263,10 @@ func (r *renderer) findings(sm store.Summary) {
 			}
 			fmt.Fprintf(&b, "%d(%d)", p.Port, p.Count)
 		}
-		fmt.Printf("  %s  %s\n", c.dim("ports"), b.String())
+		row("ports", b.String())
 	}
 	if len(sm.Protocols) > 0 {
-		fmt.Printf("  %s  %s\n", c.dim("proto"), joinLabels(sm.Protocols))
+		row("proto", joinLabels(sm.Protocols))
 	}
 
 	// web / tls / crawl line
@@ -288,14 +292,14 @@ func (r *renderer) findings(sm store.Summary) {
 		wp = append(wp, c.red(fmt.Sprintf("crawl %d sensibles", sm.SensitivePaths)))
 	}
 	if len(wp) > 0 {
-		fmt.Printf("  %s  %s\n", c.dim("web"), strings.Join(wp, " · "))
+		row("web", strings.Join(wp, " · "))
 	}
 	if len(sm.Countries) > 0 {
-		fmt.Printf("  %s  %s\n", c.dim("geo"), joinLabels(sm.Countries))
+		row("geo", joinLabels(sm.Countries))
 	}
 
 	if len(sm.RecentHosts) > 0 {
-		fmt.Printf("  %s\n", c.dim("derniers"))
+		row("derniers", "")
 		for i, h := range sm.RecentHosts {
 			if i >= 5 {
 				break
