@@ -403,7 +403,7 @@ func rewindPos(pos uint64, mode string, workers int) uint64 {
 // line to stderr (a \r-updated line on a TTY, periodic plain lines otherwise).
 // The returned stop func emits a final update and returns.
 func startReporter(st *store.SQLite, progress, tty bool, total uint64,
-	scanned, found *int64, sig string, seed uint64, pos *uint64, addrTotal uint64) func() {
+	scanned, found *int64, sig string, seed uint64, pos *uint64, addrTotal uint64, label string) func() {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 
@@ -411,12 +411,16 @@ func startReporter(st *store.SQLite, progress, tty bool, total uint64,
 		if st == nil {
 			return
 		}
+		note := fmt.Sprintf("found=%d", atomic.LoadInt64(found))
+		if label != "" {
+			note = label + " · " + note
+		}
 		_ = st.Heartbeat(context.Background(), store.RunStat{
 			Tool:      "ns-discover",
 			PID:       os.Getpid(),
 			Counter:   atomic.LoadInt64(scanned),
 			Total:     int64(total),
-			Note:      fmt.Sprintf("found=%d", atomic.LoadInt64(found)),
+			Note:      note,
 			UpdatedAt: time.Now().UTC(),
 		})
 		writeCheckpoint(st, sig, seed, pos, addrTotal)
