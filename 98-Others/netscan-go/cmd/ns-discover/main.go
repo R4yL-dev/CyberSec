@@ -284,13 +284,13 @@ func main() {
 		if ctx.Err() != nil {
 			if st != nil {
 				pct := 100 * float64(atomic.LoadInt64(&scanned)) / float64(progTotal)
-				fmt.Fprintf(os.Stderr, "[*] interrupted at ~%.1f%% — resume with the same command + --resume\n", pct)
+				fmt.Fprintf(os.Stderr, "[*] interrupted at ~%.1f%%\n", pct)
 			} else {
-				fmt.Fprintln(os.Stderr, "[*] interrupted (no --db, so nothing to resume — add --db next time)")
+				fmt.Fprintln(os.Stderr, "[*] interrupted")
 			}
-		} else {
-			fatal("%v", runErr)
+			os.Exit(130) // signal interruption — non-zero so the launcher stops the whole scan
 		}
+		fatal("%v", runErr)
 	}
 }
 
