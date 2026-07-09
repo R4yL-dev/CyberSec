@@ -21,6 +21,29 @@ func Count(n uint64) string {
 	}
 }
 
+// Bar renders a text progress bar of the given cell width, e.g. Bar(0.62, 10)
+// → "██████░░░░". frac is clamped to [0,1].
+func Bar(frac float64, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	if frac < 0 {
+		frac = 0
+	} else if frac > 1 {
+		frac = 1
+	}
+	filled := int(frac*float64(width) + 0.5)
+	out := make([]rune, width)
+	for i := range out {
+		if i < filled {
+			out[i] = '█'
+		} else {
+			out[i] = '░'
+		}
+	}
+	return string(out)
+}
+
 // Duration renders a duration compactly for progress/ETA: 45s, 17m36s, 14h02m.
 func Duration(d time.Duration) string {
 	if d < 0 {

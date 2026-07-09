@@ -19,6 +19,26 @@ func TestCount(t *testing.T) {
 	}
 }
 
+func TestBar(t *testing.T) {
+	cases := []struct {
+		frac  float64
+		width int
+		want  string
+	}{
+		{0, 4, "░░░░"},
+		{1, 4, "████"},
+		{0.5, 4, "██░░"},
+		{-1, 3, "░░░"},  // clamped low
+		{2, 3, "███"},   // clamped high
+		{0.62, 10, "██████░░░░"},
+	}
+	for _, c := range cases {
+		if got := Bar(c.frac, c.width); got != c.want {
+			t.Errorf("Bar(%v, %d) = %q, want %q", c.frac, c.width, got, c.want)
+		}
+	}
+}
+
 func TestDuration(t *testing.T) {
 	cases := map[time.Duration]string{
 		45 * time.Second:                "45s",

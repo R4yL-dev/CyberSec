@@ -126,6 +126,12 @@ func main() {
 			fatal("open store: %v", err)
 		}
 		defer st.Close()
+		// Stamp the scan start so ns-status can show elapsed time. A resume keeps
+		// the original start; a fresh run (re)sets it.
+		if !*resume {
+			_ = st.SetMeta(context.Background(), store.MetaScanStarted,
+				strconv.FormatInt(time.Now().UnixMilli(), 10))
+		}
 	}
 
 	seed := pickSeed(*seedFlag)

@@ -176,6 +176,97 @@ func TestFailBackoffThenDeadLetter(t *testing.T) {
 	}
 }
 
+// completeWith claims the single pending detect item and completes it with h,
+// persisting h's enrichment (Ports/Status/…) — used to seed Summary aggregations.
+func completeWith(t *testing.T, s *SQLite, h *model.HostRecord) {
+	t.Helper()
+	ctx := context.Background()
+	items, err := s.Claim(ctx, model.StageDetect, 1, time.Second)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("claim: %d items, err=%v", len(items), err)
+	}
+	if err := s.Complete(ctx, items[0].ID, h); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+}
+
+func TestSummaryFindings(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	// Host A: web (80+443), an expired cert + weak-TLS warning, a sensitive path, FR.
+	if err := s.Ingest(ctx, rec("1.1.1.1", 80, 443), model.StageDetect, &model.GeoInfo{Country: "FR"}); err != nil {
+		t.Fatal(err)
+	}
+	completeWith(t, s, &model.HostRecord{
+		IP: netip.MustParseAddr("1.1.1.1"),
+		Ports: map[uint16]*model.PortInfo{
+			80: {Port: 80, Protocol: "http", HTTP: &model.HTTPInfo{URL: "http://1.1.1.1", Server: "nginx"},
+				Crawl: &model.CrawlInfo{Paths: []model.FoundPath{{Path: "/.git/config", Status: 200, Category: "sensitive"}}}},
+			443: {Port: 443, Protocol: "https", HTTP: &model.HTTPInfo{URL: "https://1.1.1.1"},
+				TLSDeep: &model.TLSDeepInfo{Chain: []model.CertSummary{{SubjectCN: "x", Expired: true}}, Warnings: []string{"TLS 1.0 enabled"}}},
+		},
+		Status: map[string]string{"detect": "ok", "webinfo": "ok", "crawl": "ok", "tls-deep": "ok"},
+	})
+
+	// Host B: ssh only, US.
+	if err := s.Ingest(ctx, rec("2.2.2.2", 22), model.StageDetect, &model.GeoInfo{Country: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	completeWith(t, s, &model.HostRecord{
+		IP:     netip.MustParseAddr("2.2.2.2"),
+		Ports:  map[uint16]*model.PortInfo{22: {Port: 22, Protocol: "ssh", Banner: "OpenSSH_8.9"}},
+		Status: map[string]string{"detect": "ok"},
+	})
+
+	sm, err := s.Summary(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sm.Hosts != 2 {
+		t.Fatalf("hosts=%d, want 2", sm.Hosts)
+	}
+	if len(sm.TopPorts) != 3 { // 22, 80, 443 each on one host
+		t.Fatalf("top ports=%v, want 3 distinct", sm.TopPorts)
+	}
+	proto := map[string]int64{}
+	for _, p := range sm.Protocols {
+		proto[p.Label] = p.Count
+	}
+	if proto["http"] != 1 || proto["https"] != 1 || proto["ssh"] != 1 {
+		t.Fatalf("protocols=%v", sm.Protocols)
+	}
+	if sm.WebServers != 2 { // 80 and 443 both carry an HTTP response
+		t.Fatalf("web servers=%d, want 2", sm.WebServers)
+	}
+	if sm.TLSPorts != 1 {
+		t.Fatalf("tls ports=%d, want 1", sm.TLSPorts)
+	}
+	if sm.TLSExpired != 1 {
+		t.Fatalf("tls expired=%d, want 1", sm.TLSExpired)
+	}
+	if sm.TLSWeak != 1 {
+		t.Fatalf("tls weak=%d, want 1", sm.TLSWeak)
+	}
+	if sm.SensitivePaths != 1 {
+		t.Fatalf("sensitive paths=%d, want 1", sm.SensitivePaths)
+	}
+	if sm.StageCoverage["detect"] != 2 || sm.StageCoverage["webinfo"] != 1 {
+		t.Fatalf("stage coverage=%v", sm.StageCoverage)
+	}
+	cc := map[string]int64{}
+	for _, c := range sm.Countries {
+		cc[c.Label] = c.Count
+	}
+	if cc["FR"] != 1 || cc["US"] != 1 {
+		t.Fatalf("countries=%v", sm.Countries)
+	}
+	if sm.QueueByStage["detect"][StateDone] != 2 {
+		t.Fatalf("queue detect done=%v, want 2", sm.QueueByStage["detect"])
+	}
+}
+
 func TestLeaseExpiryReclaim(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
