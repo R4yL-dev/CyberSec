@@ -1,0 +1,26 @@
+====================================================================
+netscan analysis · 20260709-175435
+====================================================================
+targets : 195.202.193.0/26
+extra   : (none)
+host    : Linux kali 7.0.12+kali-amd64 #1 SMP PREEMPT_DYNAMIC Kali 7.0.12-2kali1 (2026-06-18) x86_64 GNU/Linux
+getcap  : /home/luca/CyberSec/98-Others/netscan-go/bin/ns-discover cap_net_admin,cap_net_raw=eip  · uid=1000
+commit  : 6a7d03d (dirty)
+
+#################### RUN LOG — full SYN scan ####################
+$ netscan scan --syn --targets 195.202.193.0/26  --db syn.db
+
+netscan: mode: SYN+ping (setcap) · adaptive · db=ns-analysis-20260709-175435/syn.db
+netscan: live dashboard (other terminal) ->  netscan status --db ns-analysis-20260709-175435/syn.db --interval 2s
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 47012)
+[*] ns-enrich stages=detect,webinfo,crawl,tls-deep,ptr workers=50 (drain=false follow=true)
+[*] syn     : src-port=47012 (scope iptables RST rule to this port)
+[*] targets : 64 addresses (seed=10447968749196386544)
+[*] ports   : 100 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 6 host(s) found | 6.4k probes in 9s (~679 pps)
+    details: ns-status --db ns-analysis-20260709-175435/syn.db
+syn-scan: removed iptables RST guard (sport 47012)
+[*] icmp    : echo liveness sweep
+[*] targets : 64 addresses (seed=3041472666722879556)
+[*] ports   : 100 port(s) | mode=icmp | rate=1000 pps | workers=-1
