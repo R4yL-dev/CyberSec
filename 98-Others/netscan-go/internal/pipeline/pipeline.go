@@ -41,7 +41,7 @@ func WithPortscan(pl Pipeline, opts Options) Pipeline {
 		return pl // no detect entry to hang portscan off; leave unchanged
 	}
 	pl[model.StagePortscan] = Stage{
-		Enricher: enrich.NewPortscan(opts.DeepPorts, opts.DeepTimeout),
+		Enricher: enrich.NewPortscan(opts.DeepPorts, opts.DeepTimeout, opts.DeepConc),
 		Next:     []Edge{{To: model.StageDetect, When: enrich.HasNewPorts}},
 	}
 	d := pl[model.StageDetect]
@@ -65,6 +65,7 @@ type Options struct {
 	Timeout     time.Duration
 	DeepPorts   []uint16      // for the portscan palier
 	DeepTimeout time.Duration // per-port connect timeout for portscan (short: it's a sweep)
+	DeepConc    int           // global cap on simultaneous portscan connects (0 → default)
 }
 
 // enrichers maps a stage/enricher name to its constructor. The map key is both
@@ -75,7 +76,7 @@ var enrichers = map[string]func(Options) enrich.Enricher{
 	model.StageCrawl:    func(o Options) enrich.Enricher { return enrich.NewCrawl(o.Timeout) },
 	model.StageTLSDeep:  func(o Options) enrich.Enricher { return enrich.NewTLSDeep(o.Timeout) },
 	model.StagePTR:      func(Options) enrich.Enricher { return enrich.NewPTR() },
-	model.StagePortscan: func(o Options) enrich.Enricher { return enrich.NewPortscan(o.DeepPorts, o.DeepTimeout) },
+	model.StagePortscan: func(o Options) enrich.Enricher { return enrich.NewPortscan(o.DeepPorts, o.DeepTimeout, o.DeepConc) },
 }
 
 // selectors maps a config `when:` name to its predicate. Empty/absent = always.

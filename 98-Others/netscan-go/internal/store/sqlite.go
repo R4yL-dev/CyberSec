@@ -285,6 +285,17 @@ func (s *SQLite) Complete(ctx context.Context, id int64, host *model.HostRecord)
 	return tx.Commit()
 }
 
+// Touch extends a leased item's deadline. A worker calls it periodically while a
+// slow palier (e.g. a large portscan sweep) is still running, so the item isn't
+// reclaimed and re-run by another worker mid-flight. If the worker dies, Touch
+// stops and the lease expires normally, restoring crash recovery.
+func (s *SQLite) Touch(ctx context.Context, id int64, lease time.Duration) error {
+	_, err := s.w.ExecContext(ctx, `
+		UPDATE work SET leased_until=? WHERE id=? AND state='leased'`,
+		nowMS()+lease.Milliseconds(), id)
+	return err
+}
+
 func (s *SQLite) Fail(ctx context.Context, id int64, maxAttempts int, base time.Duration) error {
 	var attempts int
 	if err := s.w.QueryRowContext(ctx, `SELECT attempts FROM work WHERE id=?`, id).Scan(&attempts); err != nil {
