@@ -182,14 +182,17 @@ attached to the binary file, so it is cleared every time you rebuild** — re-ru
 ## Usage
 
 `netscan scan` is the one command you need — **by default it does everything reasonable, no
-config**: it discovers hosts (SYN if the binary has the capability, else connect) on the top-100
-common ports, then fully enriches them (protocol detection, HTTP + TLS on web, sensitive-path
-crawl, banner on non-web, reverse DNS). Flags only **restrict or tune**; nothing needs enabling.
+config**. It is **adaptive**: pass 1 discovers hosts broadly (top-100 common ports, plus an ICMP
+ping sweep when privileged); pass 2 then re-scans only the **live /24 blocks** with a wider port set
+(top-1000) to catch hosts on uncommon ports — then it fully enriches everything (protocol detection,
+HTTP + TLS on web, sensitive-path crawl, banner on non-web, reverse DNS). Flags only **restrict or
+tune**; nothing needs enabling. Use `--fast` for a single quick pass.
 
 ```bash
-make build            # (once) — and `make setcap` if you want SYN speed
-netscan scan --targets 1.1.1.0/24                 # comprehensive default
-netscan status --db scan.db                       # summary
+make build            # (once)
+netscan scan --targets 1.1.1.0/24                 # adaptive default (2 passes + ping)
+sudo netscan scan --targets 10.0.0.0/16           # SYN + ping; enrichment drops to your user
+netscan scan --targets 1.1.1.0/24 --fast          # single quick pass (today's behavior)
 netscan status --db scan.db --host 1.1.1.1        # full record for one host
 netscan scan --help                               # grouped, documented options
 ```
@@ -197,11 +200,19 @@ netscan scan --help                               # grouped, documented options
 `scan` overlaps discovery and enrichment: an `ns-enrich --follow` worker drains the queue live
 while discovery runs, and exits when done. Watch it: `netscan status --db scan.db --interval 2s`.
 
-**Discovery method is automatic.** With `make setcap` done, `scan` uses fast **SYN**; otherwise it
-falls back to **connect** (and says so). The SYN kernel-RST iptables guard is used only if
-passwordless sudo is available; otherwise SYN runs without it (harmless, slightly less polite).
-Force with `--syn` / `--connect`. Clean up a leftover guard from a killed scan with
-`netscan iptables-clean`.
+**Adaptive widening.** Widening the port set on *every* address is wasteful (the internet is mostly
+empty); widening only the /24s that showed life is proportional to what's actually there. `--fast`
+skips it; `--widen-ports N|SPEC` sets the pass-2 breadth (default top-1000; `all` or `1-1024` work);
+`--widen-min-hosts N` only widens /24s with ≥N live hosts. The pass-2 target list is derived with
+`ns-status --db X --live-blocks 24`.
+
+**SYN is triggered by privilege — hybrid.** `scan` uses fast **SYN** when run as **root/sudo** *or*
+when `ns-discover` carries `CAP_NET_RAW` (`make setcap`, optional); otherwise it falls back to
+**connect** (and says so). ICMP liveness needs the same privilege (skipped in connect mode). Force
+the TCP method with `--syn` / `--connect`. Under **sudo**, only `ns-discover` runs as root (raw
+sockets); `ns-enrich`/`ns-ingest` drop to `$SUDO_USER` so the enrichment that parses untrusted
+remote data stays unprivileged. The SYN kernel-RST iptables guard is applied directly under root, or
+via passwordless sudo with the capability; clean up a leftover guard with `netscan iptables-clean`.
 
 **Common options** (see `netscan scan --help` for the grouped list):
 
@@ -241,7 +252,8 @@ it's off by default. `--all-ports-timeout` (default `2s`) tunes the per-port swe
 | `--no-skip-reserved` | `false`    | Do **not** skip reserved/private ranges.                   |
 | `--ports`            | —          | Ports: list/ranges (`80,443,8000-8100`) or `all`; overrides `--top-ports`. |
 | `--top-ports`        | `100`      | Scan the N most common ports (the discovery default; a host is found only if one of these is open, so a narrow set misses non-web-only hosts). |
-| `--mode`             | `connect`  | `connect` or `syn`.                                        |
+| `--mode`             | `connect`  | `connect`, `syn`, or `icmp` (echo liveness sweep).         |
+| `--label`            | —          | short sweep label surfaced in `ns-status` (e.g. broad, ping, widening N blocks). |
 | `--rate`             | `1000`     | Max probes per second (`0` = unlimited).                   |
 | `--workers`          | `-1` (auto)| Connect concurrency. Auto = `rate × timeout`, bounded by the FD limit and 4096; set `>0` to override. Reaching high rates needs this many concurrent dials — SYN mode avoids the ceiling. |
 | `--timeout`          | `1.5s`     | Per-connection timeout (connect mode).                     |
@@ -323,7 +335,8 @@ guard runs portscan once). To widen the *discovery* phase instead, use `--top-po
 most common ports across the whole address space). `--all-ports` and `--pipeline` are mutually
 exclusive — wire portscan into your custom graph directly if you need both.
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard), `--host IP`
-(full record as raw JSON), `--no-color` (disable ANSI). The dashboard is **phase-aware** — it reads
+(full record as raw JSON), `--no-color` (disable ANSI), `--live-blocks N` / `--min-hosts M` (print
+the live /N blocks as CIDRs — the adaptive pass-2 target list). The dashboard is **phase-aware** — it reads
 `meta.ingest.state` + queue depth to know whether the scan is *discovering*, *enriching*, or *done*
 — and shows progress bars (discovery %/pps/ETA, enrichment done/remaining/ETA), the work **per palier** —
 a `running` line (what's executing now, e.g. `portscan`/`tls-deep`/`detect`), a `queue` line (pending
