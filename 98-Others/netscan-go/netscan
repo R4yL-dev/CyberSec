@@ -46,8 +46,8 @@ cmd_scan() {
 			--syn)  syn=1; shift ;;
 			--geoip|--asn) geo_flags+=("$1" "$2"); geo_set=1; shift 2 ;;
 			--geoip=*|--asn=*) geo_flags+=("$1"); geo_set=1; shift ;;
-			--pipeline|--ports-deep) enrich_flags+=("$1" "$2"); shift 2 ;;
-			--pipeline=*|--ports-deep=*) enrich_flags+=("$1"); shift ;;
+			--pipeline|--ports-deep|--ports-deep-timeout) enrich_flags+=("$1" "$2"); shift 2 ;;
+			--pipeline=*|--ports-deep=*|--ports-deep-timeout=*) enrich_flags+=("$1"); shift ;;
 			-h|--help) usage ;;
 			*)      args+=("$1"); shift ;;
 		esac

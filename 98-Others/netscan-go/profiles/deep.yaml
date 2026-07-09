@@ -17,7 +17,7 @@ stages:
       - {to: portscan, when: needs_portscan}
   portscan:
     next:
-      - {to: detect, when: always}   # re-classify/enrich any newly-found ports
+      - {to: detect, when: has_new_ports}  # re-classify/enrich ONLY if new ports were found
   webinfo: {}
   crawl: {}
   tls-deep: {}

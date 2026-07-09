@@ -40,6 +40,7 @@ func main() {
 	pipelinePath := flag.String("pipeline", "", "YAML pipeline config (default: built-in graph)")
 	printPipeline := flag.Bool("print-pipeline", false, "print the default pipeline YAML and exit")
 	portsDeep := flag.String("ports-deep", "", "portscan breadth: 'all', a spec like 1-1024,3306, or empty = common set")
+	portsDeepTimeout := flag.Duration("ports-deep-timeout", 2*time.Second, "portscan per-port connect timeout (short: it's a sweep; raise on high-latency/lossy networks)")
 	flag.Parse()
 
 	if *printPipeline {
@@ -54,7 +55,7 @@ func main() {
 	if err != nil {
 		fatal("--ports-deep: %v", err)
 	}
-	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts}
+	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts, DeepTimeout: *portsDeepTimeout}
 	pl, err := loadPipeline(*pipelinePath, opts)
 	if err != nil {
 		fatal("%v", err)
@@ -170,28 +171,34 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 func process(ctx context.Context, st *store.SQLite, pl pipeline.Pipeline,
 	it store.WorkItem, maxAttempts int, base time.Duration) {
 
+	// The Enrich probes use ctx (so Ctrl-C aborts network I/O fast), but the DB
+	// writes below use a non-cancellable context: a worker that finished must
+	// persist its result / requeue on shutdown instead of leaving the item stuck
+	// in `leased`. Writes are fast (WAL single-writer), so this can't hang.
+	wctx := context.WithoutCancel(ctx)
+
 	stg, ok := pl[it.Stage]
 	if !ok {
-		_ = st.Fail(ctx, it.ID, maxAttempts, base)
+		_ = st.Fail(wctx, it.ID, maxAttempts, base)
 		return
 	}
 	host, err := st.Host(ctx, it.IP)
 	if err != nil || host == nil {
-		_ = st.Fail(ctx, it.ID, maxAttempts, base)
+		_ = st.Fail(wctx, it.ID, maxAttempts, base)
 		return
 	}
 	if err := stg.Enricher.Enrich(ctx, host); err != nil {
-		_ = st.Fail(ctx, it.ID, maxAttempts, base)
+		_ = st.Fail(wctx, it.ID, maxAttempts, base)
 		return
 	}
 	host.Attempts = it.Attempts
-	if err := st.Complete(ctx, it.ID, host); err != nil {
+	if err := st.Complete(wctx, it.ID, host); err != nil {
 		fmt.Fprintf(os.Stderr, "[!] complete %s: %v\n", it.IP, err)
 		return
 	}
 	for _, e := range stg.Next {
 		if e.When == nil || e.When(host) {
-			_ = st.Reschedule(ctx, it.IP, e.To)
+			_ = st.Reschedule(wctx, it.IP, e.To)
 		}
 	}
 }
