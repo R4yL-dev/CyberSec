@@ -119,11 +119,27 @@ func (c *Crawl) crawl(ctx context.Context, ip netip.Addr, port uint16, https boo
 	// HTTPS" 400…) reveal it here; any real probe matching this baseline is noise.
 	baseStatus, baseSize := c.fetch(ctx, client, base+"/nonexistent-a9f3c2e1b7-probe")
 
-	for _, p := range crawlProbes {
+	// Probe paths concurrently (bounded): a handful of extra requests should cost
+	// ~one round-trip, not the sum of every probe's timeout on a slow host.
+	// Results are index-keyed so the output order stays deterministic.
+	found := make([]*model.FoundPath, len(crawlProbes))
+	sem := make(chan struct{}, crawlProbeConc)
+	var wg sync.WaitGroup
+	for i, p := range crawlProbes {
 		if ctx.Err() != nil {
 			break
 		}
-		if fp := c.probePath(ctx, client, base, p, baseStatus, baseSize); fp != nil {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, p probe) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			found[i] = c.probePath(ctx, client, base, p, baseStatus, baseSize)
+		}(i, p)
+	}
+	wg.Wait()
+	for _, fp := range found {
+		if fp != nil {
 			info.Paths = append(info.Paths, *fp)
 		}
 	}
