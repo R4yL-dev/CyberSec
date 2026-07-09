@@ -288,9 +288,9 @@ stages:
   webinfo: {}
 ```
 
-Selectors are named (`always`, `is_web`, `has_tls`, `needs_portscan`); enrichers/stages are
-`detect`, `webinfo`, `crawl`, `tls-deep`, `ptr`, `portscan`. `Load` validates the graph (entry
-present, known names, edges resolve).
+Selectors are named (`always`, `is_web`, `has_tls`, `needs_portscan`, `has_new_ports`);
+enrichers/stages are `detect`, `webinfo`, `crawl`, `tls-deep`, `ptr`, `portscan`. `Load` validates
+the graph (entry present, known names, edges resolve).
 
 **Deep per-host port scan (`portscan`).** Discovery scans a small common port set across the whole
 address space (fast); the `portscan` palier then sweeps a host's ports (the slow, per-host phase).
