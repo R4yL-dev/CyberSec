@@ -117,9 +117,19 @@ Required: `HostRecord.Merge` + `store.Complete` now union/persist `open_ports`. 
 flows via `pipeline.Options` (typed, from flags — not YAML). `ns-discover --top-ports N` for the
 common-first discovery phase.
 
-**Deep scan over SYN** 🔜 planned — the `--all-ports` sweep is connect-based today (unprivileged,
-simple, correct). A SYN variant would keep scanning **the same hosts** (discovery already enumerated
-them — SYN here finds *more ports*, never more machines), but:
+**Deep scan over SYN** ✅ done — `--all-ports` uses **SYN when privileged** (sudo/root/setcap), else
+the connect `portscan` palier. The clean resolution: rather than put raw sockets into the
+deliberately-unprivileged `ns-enrich` (which is dropped to `$SUDO_USER` under sudo), the SYN deep
+sweep is a **discovery pass** — the launcher runs `ns-discover --mode syn --ports <spec> --targets
+@<all found hosts /32>` (via `run_sweep`, with the RST guard), feeding `ns-ingest` which unions the
+new ports and re-enriches. Reuses `ns-status --live-blocks 32`, `--intermediate` ingest, and the
+adaptive pass-2 machinery — **no Go changes, launcher orchestration only**. It sweeps every found
+host incl. ICMP-only ping-alive ones, and is throttled by `--rate` (better than the connect palier,
+which has only the `--all-ports-conc` concurrency cap). `ns-enrich` stays unprivileged — separation
+intact. The connect palier remains for the no-privilege path and `--pipeline` graphs.
+
+The original rationale (kept for context): a SYN variant scans **the same hosts** (discovery already
+enumerated them — SYN here finds *more ports*, never more machines):
 - **Faster**: half-open (SYN → SYN-ACK, no 3rd ACK, no teardown) — a big win on `--all-ports all`
   (65535 ports/host), the same reason discovery already uses SYN.
 - **Resource-light**: raw sockets bypass the conntrack table and ephemeral-port pool that `connect()`

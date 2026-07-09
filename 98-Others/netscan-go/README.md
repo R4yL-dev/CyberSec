@@ -228,10 +228,13 @@ netscan scan --targets 10.0.0.0/16 --all-ports all --yes  # sweep every port, bi
 netscan scan --targets 1.1.1.0/24 --pipeline my.yaml      # fully custom enrichment graph
 ```
 
-`--all-ports` is the single opt-in for the heavy per-host port sweep (the `portscan` palier): bare
-= a common set, `all` = 1-65535, or a spec like `1-1024,3306`. Newly-found ports are re-classified
-and enriched automatically. It's the most aggressive part (many connects per host, NAT-heavy), so
-it's off by default. `--all-ports-timeout` (default `2s`) tunes the per-port sweep timeout.
+`--all-ports` is the single opt-in for the deep port sweep of **every found host** (including the
+ICMP-only ping-alive ones — where it pays off most): bare = a common set, `all` = 1-65535, or a spec
+like `1-1024,3306`. Newly-found ports are re-classified and enriched automatically. **When
+privileged (sudo/root/setcap) it runs as a fast SYN discovery pass throttled by `--rate`; otherwise
+it's the connect `portscan` palier** (bounded by `--all-ports-conc`, default 500, and
+`--all-ports-timeout`, default `2s` — both connect-only). It's the most aggressive part, so it's off
+by default.
 
 **Composing the raw binaries** (streaming / long-running enrichment):
 
