@@ -18,3 +18,28 @@ syn-scan: added iptables RST guard (sport 59739)
 [*] syn     : src-port=59739 (scope iptables RST rule to this port)
 [*] targets : 64 addresses (seed=3664510418426355057)
 [*] ports   : 100 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 6 host(s) found | 6.4k probes in 9s (~679 pps)
+    details: ns-status --db ns-analysis-20260709-183451/syn.db
+syn-scan: removed iptables RST guard (sport 59739)
+[*] icmp    : echo liveness sweep
+[*] targets : 64 addresses (seed=141766679462717701)
+[*] ports   : 100 port(s) | mode=icmp | rate=1000 pps | workers=-1
+[+] 56 host(s) found | 64 probes in 3s (~20 pps)
+    details: ns-status --db ns-analysis-20260709-183451/syn.db
+[+] ingested 62 host(s)
+netscan: adaptive: widening 1 live /24 block(s)
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 57199)
+[*] syn     : src-port=57199 (scope iptables RST rule to this port)
+[*] targets : 256 addresses (seed=1183647300430087572)
+[*] ports   : 115 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 6 host(s) found | 7.4k probes in 10s (~713 pps)
+    details: ns-status --db ns-analysis-20260709-183451/syn.db
+syn-scan: removed iptables RST guard (sport 57199)
+[+] ingested 6 host(s)
+netscan: deep scan: SYN-sweeping 58 host(s) · ports=all
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 59785)
+[*] syn     : src-port=59785 (scope iptables RST rule to this port)
+[*] targets : 58 addresses (seed=17405577910819304796)
+[*] ports   : 65535 port(s) | mode=syn | rate=1000 pps | workers=-1
