@@ -230,39 +230,3 @@ func (p *SYNProber) cookie(ip netip.Addr, port uint16) uint32 {
 	x ^= x >> 16
 	return x
 }
-
-// defaultRoute finds the outbound interface name and source IPv4 address the
-// kernel would use to reach the internet.
-func defaultRoute() (string, netip.Addr, error) {
-	c, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return "", netip.Addr{}, err
-	}
-	defer c.Close()
-	la, ok := c.LocalAddr().(*net.UDPAddr)
-	if !ok {
-		return "", netip.Addr{}, fmt.Errorf("unexpected local address type")
-	}
-	src, ok := netip.AddrFromSlice(la.IP.To4())
-	if !ok {
-		return "", netip.Addr{}, fmt.Errorf("no IPv4 source address")
-	}
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return "", netip.Addr{}, err
-	}
-	for _, ifc := range ifaces {
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			if na, ok := netip.AddrFromSlice(ipnet.IP.To4()); ok && na == src {
-				return ifc.Name, src, nil
-			}
-		}
-	}
-	return "", netip.Addr{}, fmt.Errorf("cannot find interface for source %s", src)
-}
