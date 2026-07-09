@@ -40,6 +40,7 @@ func main() {
 	printPipeline := flag.Bool("print-pipeline", false, "print the default pipeline YAML and exit")
 	allPorts := flag.String("all-ports", "", "add the portscan palier and sweep these ports: 'common', 'all', or a spec like 1-1024,3306 (empty = disabled)")
 	allPortsTimeout := flag.Duration("all-ports-timeout", 2*time.Second, "portscan per-port connect timeout (short: it's a sweep; raise on high-latency/lossy networks)")
+	allPortsConc := flag.Int("all-ports-conc", 500, "portscan GLOBAL cap on simultaneous connects across all hosts (the deep scan's rate limiter)")
 	flag.Parse()
 
 	if *printPipeline {
@@ -57,7 +58,7 @@ func main() {
 	if err != nil {
 		fatal("--all-ports: %v", err)
 	}
-	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts, DeepTimeout: *allPortsTimeout}
+	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts, DeepTimeout: *allPortsTimeout, DeepConc: *allPortsConc}
 	pl, err := loadPipeline(*pipelinePath, opts)
 	if err != nil {
 		fatal("%v", err)
@@ -97,7 +98,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for it := range itemCh {
-				process(ctx, st, pl, it, *maxAttempts, *backoff)
+				process(ctx, st, pl, it, *maxAttempts, *backoff, *lease)
 				atomic.AddInt64(&inflight, -1)
 				atomic.AddInt64(&processed, 1)
 			}
@@ -174,7 +175,7 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 // process runs one work item through its stage's enricher, persists the result,
 // then enqueues the next stages whose selector passes.
 func process(ctx context.Context, st *store.SQLite, pl pipeline.Pipeline,
-	it store.WorkItem, maxAttempts int, base time.Duration) {
+	it store.WorkItem, maxAttempts int, base, lease time.Duration) {
 
 	// The Enrich probes use ctx (so Ctrl-C aborts network I/O fast), but the DB
 	// writes below use a non-cancellable context: a worker that finished must
@@ -192,7 +193,28 @@ func process(ctx context.Context, st *store.SQLite, pl pipeline.Pipeline,
 		_ = st.Fail(wctx, it.ID, maxAttempts, base)
 		return
 	}
-	if err := stg.Enricher.Enrich(ctx, host); err != nil {
+
+	// Keep the lease alive while the palier runs. A slow stage (a big portscan
+	// sweep of a filtered host can take minutes) must not outlive its lease, or
+	// another worker reclaims the same item and re-runs it — inflating the tail.
+	// The ticker fires well before the lease expires; fast stages finish first
+	// and never touch the DB.
+	stopHB := make(chan struct{})
+	go func() {
+		t := time.NewTicker(lease / 3)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopHB:
+				return
+			case <-t.C:
+				_ = st.Touch(wctx, it.ID, lease)
+			}
+		}
+	}()
+	err = stg.Enricher.Enrich(ctx, host)
+	close(stopHB)
+	if err != nil {
 		_ = st.Fail(wctx, it.ID, maxAttempts, base)
 		return
 	}

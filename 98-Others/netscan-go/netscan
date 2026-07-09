@@ -47,6 +47,9 @@ SCAN OPTIONS
     --all-ports [SPEC]            ALSO deep-sweep each host's ports (opt-in, heavy):
                                   bare = common set, 'all' = 1-65535, or a spec
     --all-ports-timeout DUR       per-port sweep timeout (default 2s)
+    --all-ports-conc N            global cap on simultaneous sweep connects,
+                                  across all hosts (default 500; the deep scan's
+                                  rate limiter — lower it if your link gets flaky)
     --pipeline FILE               fully custom enrichment graph (advanced)
     --enrich-workers N            enrichment concurrency (default 50)
     --enrich-timeout DUR          per-probe enrichment timeout (default 10s)
@@ -98,6 +101,8 @@ cmd_scan() {
 			--all-ports=*) all_ports_set=1; all_ports="${1#*=}"; shift ;;
 			--all-ports-timeout) enrich+=(--all-ports-timeout "$2"); shift 2 ;;
 			--all-ports-timeout=*) enrich+=("--all-ports-timeout=${1#*=}"); shift ;;
+			--all-ports-conc) enrich+=(--all-ports-conc "$2"); shift 2 ;;
+			--all-ports-conc=*) enrich+=("--all-ports-conc=${1#*=}"); shift ;;
 			--pipeline) pipeline_file="$2"; shift 2 ;;
 			--pipeline=*) pipeline_file="${1#*=}"; shift ;;
 			--enrich-workers) enrich+=(--workers "$2"); shift 2 ;;
