@@ -240,7 +240,7 @@ guard with `netscan iptables-clean`.
 | `--exclude`          | —          | Comma-separated CIDRs to exclude.                           |
 | `--exclude-file`     | —          | File of CIDRs to exclude.                                   |
 | `--no-skip-reserved` | `false`    | Do **not** skip reserved/private ranges.                   |
-| `--ports`            | —          | Comma-separated ports; overrides `--top-ports` when set.    |
+| `--ports`            | —          | Ports: list/ranges (`80,443,8000-8100`) or `all`; overrides `--top-ports`. |
 | `--top-ports`        | `100`      | Scan the N most common ports (the discovery default; a host is found only if one of these is open, so a narrow set misses non-web-only hosts). |
 | `--mode`             | `connect`  | `connect` or `syn`.                                        |
 | `--rate`             | `1000`     | Max probes per second (`0` = unlimited).                   |
