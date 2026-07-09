@@ -36,3 +36,28 @@ func TestSelectors(t *testing.T) {
 		t.Fatal("HasTLS must fail without TLS")
 	}
 }
+
+func TestHasNewPorts(t *testing.T) {
+	// All open ports already have a detect result → nothing new.
+	done := &model.HostRecord{
+		OpenPorts: []uint16{80, 443},
+		Ports: map[uint16]*model.PortInfo{
+			80:  {Port: 80, Protocol: model.ProtoHTTP},
+			443: {Port: 443, Protocol: model.ProtoHTTPS},
+		},
+	}
+	if HasNewPorts(done) {
+		t.Fatal("HasNewPorts must be false when every port is already classified")
+	}
+	// portscan added 8443 (in OpenPorts, no Ports entry yet) → new port.
+	withNew := &model.HostRecord{
+		OpenPorts: []uint16{80, 443, 8443},
+		Ports: map[uint16]*model.PortInfo{
+			80:  {Port: 80, Protocol: model.ProtoHTTP},
+			443: {Port: 443, Protocol: model.ProtoHTTPS},
+		},
+	}
+	if !HasNewPorts(withNew) {
+		t.Fatal("HasNewPorts must be true when an open port has no detect result")
+	}
+}
