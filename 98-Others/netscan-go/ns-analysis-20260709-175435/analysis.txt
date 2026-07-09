@@ -58,3 +58,59 @@ HOSTS 66
     195.202.193.200 80,443
   → details: netscan status --db syn.db --host <IP>
 
+#################### REPORT — full SYN scan ####################
+
+===== netscan report · syn.db · 2026-07-09 17:56:09 =====
+
+## overview
+  elapsed        1m34s
+  ingest.state   done
+  hosts          66
+  ns-discover    counter=29440 total=29440 · widening 1 blocks · found=20
+  ns-ingest      counter=0
+  ns-enrich      counter=48
+
+## queue (stage × state)
+  crawl     done=10
+  detect    done=10
+  ptr       done=10
+  tls-deep  done=8
+  webinfo   done=10
+  failed=0  leased(in-flight/stuck)=0
+
+## hosts: 66 total · 10 with ports · 56 ping-only
+  195.202.193.134 ports=80,443,5000 proto=http,https,http services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-134.dynamic.hispeed.ch CH/AS6730
+  195.202.193.155 ports=80,443 proto=http,https services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-155.dynamic.hispeed.ch CH/AS6730
+  195.202.193.197 ports=8443 proto=https services=httpd/2.0 stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-197.dynamic.hispeed.ch CH/AS6730
+  195.202.193.200 ports=80,443 proto=http,https services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-200.dynamic.hispeed.ch CH/AS6730
+  195.202.193.22  ports=21,443 proto=ftp,https services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-22.dynamic.hispeed.ch CH/AS6730
+  195.202.193.224 ports=80,443 proto=http,https services=nginx/1.22.1,express stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-224.dynamic.hispeed.ch CH/AS6730
+  195.202.193.27  ports=80,443,5000 proto=http,https,http services=nginx stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-27.dynamic.hispeed.ch CH/AS6730
+  195.202.193.33  ports=8443 proto=https services=httpd/3.0 stages=crawl,detect,ptr,tls-deep,webinfo 195-202-193-33.dynamic.hispeed.ch CH/AS6730
+  195.202.193.79  ports=80,5000 proto=http,http services=nginx stages=crawl,detect,ptr,webinfo 195-202-193-79.dynamic.hispeed.ch CH/AS6730
+  195.202.193.85  ports=80,443 proto=unknown,https services=- stages=crawl,detect,ptr,webinfo 195-202-193-85.dynamic.hispeed.ch CH/AS6730
+  ping-only (56): 195.202.193.1 195.202.193.10 195.202.193.11 195.202.193.12 195.202.193.13 195.202.193.14 195.202.193.15 195.202.193.16 195.202.193.17 195.202.193.18 195.202.193.19 195.202.193.20 195.202.193.21 195.202.193.23 195.202.193.24 195.202.193.25 195.202.193.26 195.202.193.28 195.202.193.29 195.202.193.3 … +36
+
+## findings
+  ports    80(7) 443(7) 5000(3) 8443(2) 21(1)
+  proto    https 9 · http 9 · unknown 1 · ftp 1
+  web      17 srv · tls 8 (0 expired, 1 weak) · crawl 10 sensitive
+  geo      CH 66
+
+## anomalies (2)
+  ! gap: 195.202.193.85 has TLS but tls-deep not done
+  ! 56 ping-only host(s) with no open ports (expected if serviceless or pending deep scan)
+
+#################### DIFF — SYN --fast (A) vs connect --fast (B) ####################
+# A-only = SYN found, connect didn't (SYN reliability wins — good)
+# B-only = connect found, SYN MISSED  (potential false negative — the concern)
+
+===== netscan diff · A=ns-analysis-20260709-175435/synfast.db · B=ns-analysis-20260709-175435/connfast.db =====
+A: 3 hosts · B: 3 hosts
+
+## hosts only in A (0)
+
+## hosts only in B (0)
+
+## port differences (common hosts)
+  (none — common hosts have identical ports)
