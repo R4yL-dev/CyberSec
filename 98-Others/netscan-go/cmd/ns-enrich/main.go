@@ -36,10 +36,10 @@ func main() {
 	backoff := flag.Duration("backoff", 5*time.Second, "base retry backoff")
 	drain := flag.Bool("drain", false, "exit once the queue is empty instead of polling")
 	follow := flag.Bool("follow", false, "keep draining until ingestion is done, then exit")
-	pipelinePath := flag.String("pipeline", "", "YAML pipeline config (default: built-in graph)")
+	pipelinePath := flag.String("pipeline", "", "YAML pipeline config for a fully custom graph")
 	printPipeline := flag.Bool("print-pipeline", false, "print the default pipeline YAML and exit")
-	portsDeep := flag.String("ports-deep", "", "portscan breadth: 'all', a spec like 1-1024,3306, or empty = common set")
-	portsDeepTimeout := flag.Duration("ports-deep-timeout", 2*time.Second, "portscan per-port connect timeout (short: it's a sweep; raise on high-latency/lossy networks)")
+	allPorts := flag.String("all-ports", "", "add the portscan palier and sweep these ports: 'common', 'all', or a spec like 1-1024,3306 (empty = disabled)")
+	allPortsTimeout := flag.Duration("all-ports-timeout", 2*time.Second, "portscan per-port connect timeout (short: it's a sweep; raise on high-latency/lossy networks)")
 	flag.Parse()
 
 	if *printPipeline {
@@ -49,15 +49,21 @@ func main() {
 	if *dbPath == "" {
 		fatal("--db is required")
 	}
-
-	deepPorts, err := parsePortSpec(*portsDeep)
-	if err != nil {
-		fatal("--ports-deep: %v", err)
+	if *allPorts != "" && *pipelinePath != "" {
+		fatal("--all-ports and --pipeline are mutually exclusive (wire portscan in the custom pipeline instead)")
 	}
-	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts, DeepTimeout: *portsDeepTimeout}
+
+	deepPorts, err := resolveAllPorts(*allPorts)
+	if err != nil {
+		fatal("--all-ports: %v", err)
+	}
+	opts := pipeline.Options{Timeout: *timeout, DeepPorts: deepPorts, DeepTimeout: *allPortsTimeout}
 	pl, err := loadPipeline(*pipelinePath, opts)
 	if err != nil {
 		fatal("%v", err)
+	}
+	if *allPorts != "" {
+		pl = pipeline.WithPortscan(pl, opts) // inject the opt-in port sweep
 	}
 	stages := pl.Stages()
 	if *stageFlag != "" {
@@ -210,13 +216,19 @@ func loadPipeline(path string, opts pipeline.Options) (pipeline.Pipeline, error)
 	return pipeline.LoadFile(path, opts)
 }
 
-// parsePortSpec resolves the --ports-deep value: empty → the common set,
-// otherwise the shared port-spec parser ("all" or a list/ranges).
-func parsePortSpec(spec string) ([]uint16, error) {
-	if strings.TrimSpace(spec) == "" {
+// resolveAllPorts turns the --all-ports value into a port list: empty → disabled
+// (nil), "common" → the curated common set, otherwise the shared parser ("all"
+// or a list/ranges).
+func resolveAllPorts(spec string) ([]uint16, error) {
+	spec = strings.TrimSpace(spec)
+	switch spec {
+	case "":
+		return nil, nil // disabled
+	case "common":
 		return ports.Common(), nil
+	default:
+		return ports.Parse(spec)
 	}
-	return ports.Parse(spec)
 }
 
 func writeHeartbeat(ctx context.Context, st *store.SQLite, counter int64) {

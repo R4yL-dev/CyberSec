@@ -32,6 +32,24 @@ type Stage struct {
 // Pipeline maps a stage name to its definition.
 type Pipeline map[string]Stage
 
+// WithPortscan augments a pipeline with the opt-in portscan palier: it adds the
+// portscan stage and wires detect → portscan (needs_portscan, runs once) and
+// portscan → detect (has_new_ports, re-classify only newly found ports). Used by
+// `--all-ports` so the deep port sweep is a flag, not a separate profile file.
+func WithPortscan(pl Pipeline, opts Options) Pipeline {
+	if _, ok := pl[model.StageDetect]; !ok {
+		return pl // no detect entry to hang portscan off; leave unchanged
+	}
+	pl[model.StagePortscan] = Stage{
+		Enricher: enrich.NewPortscan(opts.DeepPorts, opts.DeepTimeout),
+		Next:     []Edge{{To: model.StageDetect, When: enrich.HasNewPorts}},
+	}
+	d := pl[model.StageDetect]
+	d.Next = append(d.Next, Edge{To: model.StagePortscan, When: enrich.NeedsPortscan})
+	pl[model.StageDetect] = d
+	return pl
+}
+
 // Stages returns all stage names in the pipeline.
 func (p Pipeline) Stages() []string {
 	out := make([]string, 0, len(p))
