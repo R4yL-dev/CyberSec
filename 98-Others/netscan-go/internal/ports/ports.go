@@ -6,6 +6,7 @@ package ports
 import (
 	_ "embed"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +62,7 @@ func Parse(spec string) ([]uint16, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no valid port in %q", spec)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out, nil
 }
 
