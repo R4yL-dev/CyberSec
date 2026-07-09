@@ -24,3 +24,37 @@ syn-scan: removed iptables RST guard (sport 47012)
 [*] icmp    : echo liveness sweep
 [*] targets : 64 addresses (seed=3041472666722879556)
 [*] ports   : 100 port(s) | mode=icmp | rate=1000 pps | workers=-1
+[+] 57 host(s) found | 64 probes in 3s (~21 pps)
+    details: ns-status --db ns-analysis-20260709-175435/syn.db
+[+] ingested 63 host(s)
+netscan: adaptive: widening 1 live /24 block(s)
+[*] geoip   : enabled
+syn-scan: added iptables RST guard (sport 43849)
+[*] syn     : src-port=43849 (scope iptables RST rule to this port)
+[*] targets : 256 addresses (seed=2103617233459501698)
+[*] ports   : 115 port(s) | mode=syn | rate=1000 pps | workers=-1
+[+] 20 host(s) found | 29.4k probes in 32s (~908 pps)
+    details: ns-status --db ns-analysis-20260709-175435/syn.db
+syn-scan: removed iptables RST guard (sport 43849)
+[+] ingested 20 host(s)
+[*] geoip   : enabled
+[+] ingested 0 host(s)
+[+] enriched 48 item(s)
+
+netscan · syn.db · 17:55:41 · elapsed 1m6s
+
+✓ SCAN COMPLETE · 66 hosts · 1m6s
+
+HOSTS 66
+  ports  80(7) 443(7) 5000(3) 8443(2) 21(1)
+  proto  https 9 · http 9 · unknown 1 · ftp 1
+  web    17 srv · tls 8 (1 weak) · crawl 10 sensitive
+  geo    CH 66
+  latest 
+    195.202.193.134 80,443,5000
+    195.202.193.79  80,5000
+    195.202.193.197 8443
+    195.202.193.22  21,443
+    195.202.193.200 80,443
+  → details: netscan status --db syn.db --host <IP>
+
