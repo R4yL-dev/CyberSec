@@ -29,8 +29,8 @@ discovers hosts broadly (SYN top-100 common ports + an ICMP ping sweep when
 privileged), then pass 2 re-scans only the live /24 blocks with a wider port set
 (top-1000) to catch hosts on uncommon ports — then fully enriches everything
 (protocol detection, HTTP + TLS on web, banner on non-web, reverse DNS).
-For a fast scan, run with **sudo** (SYN + ICMP ping); without sudo it uses connect
-(slower, no ping). Advanced: `make setcap` enables SYN without sudo. --fast = single pass.
+For a fast scan, run with sudo (SYN + ICMP ping); without sudo it uses connect
+(slower, no ping). Advanced: 'make setcap' enables SYN without sudo. --fast = single pass.
 
 SCAN OPTIONS
   Targets:

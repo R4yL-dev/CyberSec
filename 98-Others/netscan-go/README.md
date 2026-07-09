@@ -206,13 +206,16 @@ skips it; `--widen-ports N|SPEC` sets the pass-2 breadth (default top-1000; `all
 `--widen-min-hosts N` only widens /24s with ≥N live hosts. The pass-2 target list is derived with
 `ns-status --db X --live-blocks 24`.
 
-**SYN is triggered by privilege — hybrid.** `scan` uses fast **SYN** when run as **root/sudo** *or*
-when `ns-discover` carries `CAP_NET_RAW` (`make setcap`, optional); otherwise it falls back to
-**connect** (and says so). ICMP liveness needs the same privilege (skipped in connect mode). Force
-the TCP method with `--syn` / `--connect`. Under **sudo**, only `ns-discover` runs as root (raw
-sockets); `ns-enrich`/`ns-ingest` drop to `$SUDO_USER` so the enrichment that parses untrusted
-remote data stays unprivileged. The SYN kernel-RST iptables guard is applied directly under root, or
-via passwordless sudo with the capability; clean up a leftover guard with `netscan iptables-clean`.
+**For a fast scan, run with `sudo`.** The simple rule: **`sudo netscan scan …` → fast SYN + ICMP
+ping; without sudo → connect (slower, no ping).** That's all you need to remember. Under sudo, only
+`ns-discover` runs as root (raw sockets); `ns-enrich`/`ns-ingest` drop back to `$SUDO_USER`, so the
+enrichment that parses untrusted remote data stays **unprivileged** (privilege separation preserved).
+The SYN kernel-RST iptables guard is added and removed automatically. Force the TCP method with
+`--syn` / `--connect`; clean up a leftover guard from a killed scan with `netscan iptables-clean`.
+
+*Advanced:* `make setcap` grants `ns-discover` the `CAP_NET_RAW` capability so SYN works **without
+sudo** (and keeps everything unprivileged with zero gymnastics) — handy if you scan often; the
+capability is dropped on every rebuild, so re-run it after `make build`.
 
 **Common options** (see `netscan scan --help` for the grouped list):
 
