@@ -205,7 +205,9 @@ while discovery runs, and exits when done. Watch it: `netscan status --db scan.d
 empty); widening only the /24s that showed life is proportional to what's actually there. `--fast`
 skips it; `--widen-ports N|SPEC` sets the pass-2 breadth (default top-1000; `all` or `1-1024` work);
 `--widen-min-hosts N` only widens /24s with ≥N live hosts. The pass-2 target list is derived with
-`ns-status --db X --live-blocks 24`.
+`ns-status --db X --live-blocks 24`, then **clipped to your `--targets`** (via `ns-discover --within`)
+so the widen — and the deep sweep — **never probe an address outside the range you asked for**, no
+matter how small (a `/26` widens only that `/26`, not its `/24`).
 
 **For a fast scan, run with `sudo`.** The simple rule: **`sudo netscan scan …` → fast SYN + ICMP
 ping; without sudo → connect (slower, no ping).** That's all you need to remember. Under sudo, only

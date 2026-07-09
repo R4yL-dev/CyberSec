@@ -37,6 +37,10 @@ These are load-bearing architectural decisions. New work must preserve them.
    wholesale-replaced by a later stage.
 9. **The SYN capability is attached to the binary and lost on every `make build`** — SYN work
    always needs a fresh `make setcap` (or `make syn`).
+10. **Never probe an address outside `--targets` (minus `--exclude`).** Any *derived* target list —
+    the adaptive widen's live /24 blocks, the deep pass's /32 hosts — must be clipped to the original
+    scope via `ns-discover --within` (`target.Space.SetWithin` / `Allowed`). A scan must stay in the
+    authorized range regardless of range size.
 
 ## Current state (baseline)
 
