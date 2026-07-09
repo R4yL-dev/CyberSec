@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// unionPorts merges two port lists into a sorted, de-duplicated slice.
-func unionPorts(a, b []uint16) []uint16 {
+// UnionPorts merges two port lists into a sorted, de-duplicated slice.
+func UnionPorts(a, b []uint16) []uint16 {
 	set := make(map[uint16]struct{}, len(a)+len(b))
 	for _, p := range a {
 		set[p] = struct{}{}
@@ -89,7 +89,7 @@ func (h *HostRecord) Merge(in *HostRecord) {
 	// Union open ports: the portscan palier discovers ports beyond discovery, and
 	// Complete re-reads + merges — without this those new ports would be dropped.
 	if len(in.OpenPorts) > 0 {
-		h.OpenPorts = unionPorts(h.OpenPorts, in.OpenPorts)
+		h.OpenPorts = UnionPorts(h.OpenPorts, in.OpenPorts)
 	}
 	if h.Ports == nil {
 		h.Ports = make(map[uint16]*PortInfo, len(in.Ports))

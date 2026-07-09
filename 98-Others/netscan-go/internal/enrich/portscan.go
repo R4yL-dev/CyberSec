@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/netip"
-	"sort"
 	"sync"
 	"time"
 
@@ -31,7 +30,7 @@ func (p *Portscan) Stage() string { return model.StagePortscan }
 func (p *Portscan) Enrich(ctx context.Context, host *model.HostRecord) error {
 	found := p.scan(ctx, host.IP)
 	if len(found) > 0 {
-		host.OpenPorts = unionPorts(host.OpenPorts, found)
+		host.OpenPorts = model.UnionPorts(host.OpenPorts, found)
 	}
 	if host.Status == nil {
 		host.Status = make(map[string]string, 1)
@@ -82,19 +81,3 @@ func (p *Portscan) dial(ctx context.Context, ip netip.Addr, port uint16) bool {
 	return true
 }
 
-// unionPorts merges two port lists into a sorted, de-duplicated slice.
-func unionPorts(a, b []uint16) []uint16 {
-	set := make(map[uint16]struct{}, len(a)+len(b))
-	for _, p := range a {
-		set[p] = struct{}{}
-	}
-	for _, p := range b {
-		set[p] = struct{}{}
-	}
-	out := make([]uint16, 0, len(set))
-	for p := range set {
-		out = append(out, p)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
