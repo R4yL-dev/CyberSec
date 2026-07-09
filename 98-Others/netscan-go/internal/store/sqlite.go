@@ -248,6 +248,73 @@ func (s *SQLite) Host(ctx context.Context, ip netip.Addr) (*model.HostRecord, er
 	return h, nil
 }
 
+// AllHosts loads every host record (for `netscan report` / `diff`). Intended for
+// diagnostic-sized scans; it materializes all rows (see ROADMAP note on paging).
+func (s *SQLite) AllHosts(ctx context.Context) ([]*model.HostRecord, error) {
+	rows, err := s.r.QueryContext(ctx, `
+		SELECT ip, open_ports, data, status, ptr, geo, attempts, first_seen, last_seen
+		FROM hosts ORDER BY ip`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*model.HostRecord
+	for rows.Next() {
+		var (
+			ipStr, portsJSON, dataJSON, statusJSON, ptrJSON, geoJSON string
+			attempts                                                int
+			firstSeen, lastSeen                                     int64
+		)
+		if err := rows.Scan(&ipStr, &portsJSON, &dataJSON, &statusJSON, &ptrJSON, &geoJSON,
+			&attempts, &firstSeen, &lastSeen); err != nil {
+			return nil, err
+		}
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		h := &model.HostRecord{IP: addr, Attempts: attempts, FirstSeen: fromMS(firstSeen), LastSeen: fromMS(lastSeen)}
+		_ = json.Unmarshal([]byte(portsJSON), &h.OpenPorts)
+		unmarshalJSON(dataJSON, &h.Ports)
+		unmarshalJSON(statusJSON, &h.Status)
+		unmarshalJSON(ptrJSON, &h.PTR)
+		if geoJSON != "" {
+			unmarshalJSON(geoJSON, &h.Geo)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// FailedItems returns work items that are dead-lettered (failed) or currently
+// leased (potentially stuck), for the report's queue-health / anomalies section.
+func (s *SQLite) FailedItems(ctx context.Context) ([]WorkItem, error) {
+	rows, err := s.r.QueryContext(ctx, `
+		SELECT ip, stage, state, attempts FROM work
+		WHERE state IN ('failed','leased') ORDER BY state, stage, ip`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkItem
+	for rows.Next() {
+		var ipStr string
+		var it WorkItem
+		if err := rows.Scan(&ipStr, &it.Stage, &it.State, &it.Attempts); err != nil {
+			return nil, err
+		}
+		addr, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		it.IP = addr
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
 // unmarshalJSON decodes s into v unless s is empty/blank JSON.
 func unmarshalJSON(s string, v any) {
 	if s == "" || s == "{}" || s == "[]" || s == "null" {
