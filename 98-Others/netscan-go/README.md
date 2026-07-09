@@ -355,6 +355,25 @@ in a second terminal during a scan (`netscan status --db scan.db --interval 2s`)
 prints this summary once at the end.
 **`ns-ingest` flags:** `--db`.
 
+**Diagnostics: `netscan report` and `netscan diff`.** To review a scan (or hand a log to someone for
+analysis), three complementary sources — because the db only shows what *responded*, never what was
+*missed*, and runtime errors aren't persisted:
+
+```bash
+sudo netscan scan --targets 1.1.1.0/24 --all-ports all --db syn.db 2>&1 | tee scan.log  # ① run trace
+netscan report --db syn.db > report.txt                                                  # ② result state
+netscan scan --fast --connect --targets 1.1.1.0/24 --db conn.db
+netscan diff --db syn.db --db conn.db > diff.txt                                          # ③ false negatives
+```
+
+`netscan report` (`ns-status --report`) is a complete plain-text diagnostic — overview + per-binary
+heartbeats, queue health (incl. **failed/dead-lettered items**), a per-host table (ports, protocols,
+services+CPE, completed stages, PTR/geo), the findings aggregates, and **auto-detected anomalies**
+(unclassified open ports, enrichment gaps like a web port with no `webinfo`, hosts stuck before
+`detect`, failed items). It reads only, so it works mid-scan too. `netscan diff --db A --db B` lists
+the host/port differences between two scans — the false-negative check (does SYN miss anything
+connect found?). The `tee` captures the run's `[!]`/`[+]` stderr (errors, crashes, timing).
+
 ## How it works
 
 ### Discovery
