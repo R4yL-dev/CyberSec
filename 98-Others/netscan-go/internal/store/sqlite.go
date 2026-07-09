@@ -366,24 +366,33 @@ func (s *SQLite) GetMeta(ctx context.Context, key string) (string, error) {
 	return v, err
 }
 
-func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
-	st := Stats{WorkByState: map[string]int64{}, PendingByStage: map[string]int64{}}
-
-	if err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM hosts`).Scan(&st.Hosts); err != nil {
-		return st, err
+func (s *SQLite) Summary(ctx context.Context) (Summary, error) {
+	sm := Summary{
+		WorkByState:   map[string]int64{},
+		QueueByStage:  map[string]map[string]int64{},
+		StageCoverage: map[string]int64{},
 	}
 
-	if err := scanCounts(ctx, s.r, `SELECT state, count(*) FROM work GROUP BY state`, st.WorkByState); err != nil {
-		return st, err
+	if err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM hosts`).Scan(&sm.Hosts); err != nil {
+		return sm, err
 	}
-	if err := scanCounts(ctx, s.r, `SELECT stage, count(*) FROM work WHERE state='pending' GROUP BY stage`, st.PendingByStage); err != nil {
-		return st, err
+	if err := scanCounts(ctx, s.r, `SELECT state, count(*) FROM work GROUP BY state`, sm.WorkByState); err != nil {
+		return sm, err
+	}
+	if err := s.scanQueueByStage(ctx, sm.QueueByStage); err != nil {
+		return sm, err
+	}
+	// Per-stage host coverage: keys present in each host's status map = completed stages.
+	if err := scanCounts(ctx, s.r,
+		`SELECT jt.key, count(*) FROM hosts, json_each(hosts.status) jt GROUP BY jt.key`,
+		sm.StageCoverage); err != nil {
+		return sm, err
 	}
 
 	runs, err := s.r.QueryContext(ctx, `
 		SELECT tool, pid, counter, total, note, updated_at FROM runs ORDER BY updated_at DESC LIMIT 20`)
 	if err != nil {
-		return st, err
+		return sm, err
 	}
 	defer runs.Close()
 	for runs.Next() {
@@ -393,20 +402,20 @@ func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
 			upd  int64
 		)
 		if err := runs.Scan(&rs.Tool, &rs.PID, &rs.Counter, &rs.Total, &note, &upd); err != nil {
-			return st, err
+			return sm, err
 		}
 		rs.Note = note.String
 		rs.UpdatedAt = fromMS(upd)
-		st.Runs = append(st.Runs, rs)
+		sm.Runs = append(sm.Runs, rs)
 	}
 	if err := runs.Err(); err != nil {
-		return st, err
+		return sm, err
 	}
 
 	hosts, err := s.r.QueryContext(ctx, `
 		SELECT ip, open_ports, last_seen FROM hosts ORDER BY last_seen DESC LIMIT 10`)
 	if err != nil {
-		return st, err
+		return sm, err
 	}
 	defer hosts.Close()
 	for hosts.Next() {
@@ -415,17 +424,136 @@ func (s *SQLite) Stats(ctx context.Context) (Stats, error) {
 			last             int64
 		)
 		if err := hosts.Scan(&ipStr, &portsJSON, &last); err != nil {
-			return st, err
+			return sm, err
 		}
 		addr, err := netip.ParseAddr(ipStr)
 		if err != nil {
-			return st, err
+			return sm, err
 		}
 		hs := HostSummary{IP: addr, LastSeen: fromMS(last)}
 		_ = json.Unmarshal([]byte(portsJSON), &hs.OpenPorts)
-		st.RecentHosts = append(st.RecentHosts, hs)
+		sm.RecentHosts = append(sm.RecentHosts, hs)
 	}
-	return st, hosts.Err()
+	if err := hosts.Err(); err != nil {
+		return sm, err
+	}
+
+	if err := s.scanFindings(ctx, &sm); err != nil {
+		return sm, err
+	}
+	return sm, nil
+}
+
+// scanQueueByStage fills dst[stage][state] = count over the whole work table.
+func (s *SQLite) scanQueueByStage(ctx context.Context, dst map[string]map[string]int64) error {
+	rows, err := s.r.QueryContext(ctx, `SELECT stage, state, count(*) FROM work GROUP BY stage, state`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var stage, state string
+		var n int64
+		if err := rows.Scan(&stage, &state, &n); err != nil {
+			return err
+		}
+		if dst[stage] == nil {
+			dst[stage] = map[string]int64{}
+		}
+		dst[stage][state] = n
+	}
+	return rows.Err()
+}
+
+// scanFindings aggregates the per-host enrichment JSON (SQLite JSON1). Each query
+// is small; the json_tree scans walk hosts.data, which is fine for authorized-
+// range scans (see ROADMAP note on gating this at internet scale).
+func (s *SQLite) scanFindings(ctx context.Context, sm *Summary) error {
+	var err error
+	// Top open ports (by number of hosts exposing each).
+	if sm.TopPorts, err = s.topPorts(ctx, 12); err != nil {
+		return err
+	}
+	// Protocol breakdown across all classified ports.
+	if sm.Protocols, err = s.labelCounts(ctx, `
+		SELECT proto, count(*) FROM (
+			SELECT json_extract(p.value,'$.protocol') AS proto FROM hosts, json_each(hosts.data) p
+		) WHERE proto IS NOT NULL AND proto != '' GROUP BY proto ORDER BY 2 DESC`); err != nil {
+		return err
+	}
+	// Country breakdown (top 6).
+	if sm.Countries, err = s.labelCounts(ctx, `
+		SELECT c, count(*) FROM (
+			SELECT json_extract(geo,'$.country') AS c FROM hosts WHERE geo != ''
+		) WHERE c IS NOT NULL AND c != '' GROUP BY c ORDER BY 2 DESC LIMIT 6`); err != nil {
+		return err
+	}
+	scalar := func(q string) (int64, error) {
+		var n int64
+		return n, s.r.QueryRowContext(ctx, q).Scan(&n)
+	}
+	if sm.WebServers, err = scalar(`SELECT count(*) FROM hosts, json_each(hosts.data) p WHERE json_extract(p.value,'$.http') IS NOT NULL`); err != nil {
+		return err
+	}
+	if sm.TLSPorts, err = scalar(`SELECT count(*) FROM hosts, json_each(hosts.data) p WHERE json_extract(p.value,'$.tls') IS NOT NULL OR json_extract(p.value,'$.tls_deep') IS NOT NULL`); err != nil {
+		return err
+	}
+	// Findings via recursive json_tree: the fields are omitempty, so key-presence
+	// already means the finding fired (expired=true, non-empty warnings array).
+	if sm.TLSExpired, err = scalar(`SELECT count(DISTINCT ip) FROM hosts, json_tree(hosts.data) jt WHERE jt.key='expired'`); err != nil {
+		return err
+	}
+	if sm.TLSWeak, err = scalar(`SELECT count(DISTINCT ip) FROM hosts, json_tree(hosts.data) jt WHERE jt.key='warnings'`); err != nil {
+		return err
+	}
+	if sm.SensitivePaths, err = scalar(`SELECT count(*) FROM hosts, json_tree(hosts.data) jt WHERE jt.key='category' AND jt.value='sensitive'`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// topPorts returns the most-common open ports across hosts, most-frequent first.
+func (s *SQLite) topPorts(ctx context.Context, limit int) ([]PortCount, error) {
+	rows, err := s.r.QueryContext(ctx, `
+		SELECT p.value, count(*) FROM hosts, json_each(hosts.open_ports) p
+		GROUP BY p.value ORDER BY 2 DESC, p.value LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PortCount
+	for rows.Next() {
+		var port, n int64
+		if err := rows.Scan(&port, &n); err != nil {
+			return nil, err
+		}
+		out = append(out, PortCount{Port: uint16(port), Count: n})
+	}
+	return out, rows.Err()
+}
+
+// labelCounts runs a (label, count) query, skipping empty labels.
+func (s *SQLite) labelCounts(ctx context.Context, query string, args ...any) ([]LabelCount, error) {
+	rows, err := s.r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LabelCount
+	for rows.Next() {
+		var (
+			label sql.NullString
+			n     int64
+		)
+		if err := rows.Scan(&label, &n); err != nil {
+			return nil, err
+		}
+		if label.String == "" {
+			continue
+		}
+		out = append(out, LabelCount{Label: label.String, Count: n})
+	}
+	return out, rows.Err()
 }
 
 func scanCounts(ctx context.Context, db *sql.DB, query string, dst map[string]int64) error {

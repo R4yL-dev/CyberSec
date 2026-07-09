@@ -170,7 +170,7 @@ func TestFailBackoffThenDeadLetter(t *testing.T) {
 	if again, _ := s.Claim(ctx, model.StageDetect, 1, time.Second); len(again) != 0 {
 		t.Fatalf("dead-lettered item was re-claimed: %d", len(again))
 	}
-	st, _ := s.Stats(ctx)
+	st, _ := s.Summary(ctx)
 	if st.WorkByState[StateFailed] != 1 {
 		t.Fatalf("want 1 failed item, got %v", st.WorkByState)
 	}
@@ -243,7 +243,7 @@ func TestMetaAndHeartbeatTotal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	st, err := s.Stats(ctx)
+	st, err := s.Summary(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
