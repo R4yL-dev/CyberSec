@@ -74,17 +74,11 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 		return fmt.Errorf("route discovery: %w", err)
 	}
 
-	// A short read timeout (not BlockForever) lets the receiver poll a stop flag
-	// and exit cleanly — closing a pcap handle blocked in a read is unsafe.
-	handle, err := pcap.OpenLive(iface, 65536, false, 100*time.Millisecond)
-	if err != nil {
-		return fmt.Errorf("pcap open %s: %w (need CAP_NET_RAW?)", iface, err)
-	}
 	// Only our SYN-ACK replies: destined to our scan source port, SYN+ACK set.
 	filter := fmt.Sprintf("tcp and dst port %d and (tcp[13] & 0x12) = 0x12", p.srcPort)
-	if err := handle.SetBPFFilter(filter); err != nil {
-		handle.Close()
-		return fmt.Errorf("bpf filter: %w", err)
+	handle, err := openCapture(iface, filter)
+	if err != nil {
+		return err
 	}
 
 	// seen deduplicates (host, port) so a retransmitted SYN-ACK is emitted once.
@@ -139,7 +133,7 @@ func (p *SYNProber) Run(ctx context.Context, addrs iter.Seq[netip.Addr], out cha
 		}
 	}()
 
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
+	fd, err := openSendSocket()
 	if err != nil {
 		stop.Store(true)
 		<-recvDone
