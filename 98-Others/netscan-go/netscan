@@ -52,12 +52,13 @@ SCAN OPTIONS
     --resume                      resume the last interrupted scan (same --db)
     --yes                         confirm large scans / --rate 0
   Enrichment:
-    --all-ports [SPEC]            ALSO deep-sweep each host's ports (opt-in, heavy):
-                                  bare = common set, 'all' = 1-65535, or a spec
-    --all-ports-timeout DUR       per-port sweep timeout (default 2s)
-    --all-ports-conc N            global cap on simultaneous sweep connects,
-                                  across all hosts (default 500; the deep scan's
-                                  rate limiter — lower it if your link gets flaky)
+    --all-ports [SPEC]            ALSO deep-sweep every found host's ports (opt-in):
+                                  bare = common set, 'all' = 1-65535, or a spec.
+                                  SYN when privileged (fast, throttled by --rate),
+                                  else connect. Includes ping-only hosts.
+    --all-ports-timeout DUR       connect-mode per-port sweep timeout (default 2s)
+    --all-ports-conc N            connect-mode global cap on simultaneous sweep
+                                  connects (default 500). SYN mode uses --rate.
     --pipeline FILE               fully custom enrichment graph (advanced)
     --enrich-workers N            enrichment concurrency (default 50)
     --enrich-timeout DUR          per-probe enrichment timeout (default 10s)
@@ -209,7 +210,22 @@ cmd_scan() {
 		[[ -f "$ROOT/data/dbip-country.mmdb" ]] && geo+=(--geoip "$ROOT/data/dbip-country.mmdb")
 		[[ -f "$ROOT/data/dbip-asn.mmdb" ]] && geo+=(--asn "$ROOT/data/dbip-asn.mmdb")
 	fi
-	[[ $all_ports_set -eq 1 ]] && enrich+=(--all-ports "$all_ports")
+	# --all-ports deep sweep: SYN as a discovery pass when privileged (fast,
+	# rate-limited by --rate), else the connect portscan palier in ns-enrich.
+	local deep_syn=0 deep_port_args=()
+	if [[ $all_ports_set -eq 1 ]]; then
+		if [[ $use_syn -eq 1 ]]; then
+			deep_syn=1
+			case "$all_ports" in
+				common) deep_port_args=(--top-ports 1000) ;;
+				all)    deep_port_args=(--ports all) ;;
+				*)      if [[ "$all_ports" =~ ^[0-9]+$ ]]; then deep_port_args=(--top-ports "$all_ports")
+					else deep_port_args=(--ports "$all_ports"); fi ;;
+			esac
+		else
+			enrich+=(--all-ports "$all_ports")   # connect palier (unprivileged, unchanged)
+		fi
+	fi
 	[[ -n "$pipeline_file" ]] && enrich+=(--pipeline "$pipeline_file")
 
 	# --- db reuse warning: a scan appends to its --db; reusing one across ranges
@@ -246,17 +262,18 @@ cmd_scan() {
 	epid=$!
 	note "live dashboard (other terminal) ->  netscan status --db $db --interval 2s"
 
+	# Every discovery pass feeds an --intermediate ingest; a single finalize at the
+	# end flips ingest.state=done (so the --follow enricher exits once drained).
 	local rc=0
 	if [[ $fast -eq 1 ]]; then
 		# Single broad pass (no widening, no ICMP). --mark-start stamps elapsed.
 		run_sweep "" --mark-start --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
-			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
+			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+		[[ $rc -eq 130 ]] && _scan_abort
 	else
-		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep; the
-		# intermediate ingest keeps the --follow enricher alive for pass 2. A
+		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep. A
 		# subshell with `|| exit $?` propagates a sweep's exit code (e.g. 130 on
-		# interrupt) to the pipe — a plain { } block would return its trailing
-		# command's status and mask it.
+		# interrupt) to the pipe — a plain { } block would mask it.
 		(
 			run_sweep broad --mark-start --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" || exit $?
 			if [[ $use_syn -eq 1 ]]; then
@@ -266,7 +283,7 @@ cmd_scan() {
 		) | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 		[[ $rc -eq 130 ]] && _scan_abort   # interrupted → don't start pass 2
 
-		# Derive live /24 blocks and widen ports on them (or finalize if none).
+		# PASS 2 — widen ports on the live /24 blocks.
 		local blocks; blocks="$(mktemp)"
 		"$BIN/ns-status" --db "$db" --live-blocks 24 --min-hosts "$widen_min_hosts" >"$blocks" 2>/dev/null || true
 		local n; n="$(grep -c . "$blocks" 2>/dev/null || echo 0)"
@@ -275,14 +292,31 @@ cmd_scan() {
 		if [[ "$n" -gt 0 ]]; then
 			note "adaptive: widening $n live /24 block(s)"
 			run_sweep "widening $n blocks" --targets "@$blocks" "${excl[@]}" "${tune[@]}" "${widen_args[@]}" \
-				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
-		else
-			note "adaptive: no live blocks to widen"
-			: | "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?  # finalize (marks ingest done)
+				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+			[[ $rc -eq 130 ]] && _scan_abort
 		fi
 		rm -f "$blocks"
 	fi
-	[[ $rc -eq 130 ]] && _scan_abort   # interrupted during the last pass
+
+	# DEEP PASS — SYN-sweep every found host (incl. ping-only) across the
+	# --all-ports port set. Privileged (root/setcap) + rate-limited by --rate; the
+	# connect path uses the ns-enrich portscan palier instead (see gating above).
+	if [[ $deep_syn -eq 1 ]]; then
+		local hosts; hosts="$(mktemp)"
+		"$BIN/ns-status" --db "$db" --live-blocks 32 --min-hosts 1 >"$hosts" 2>/dev/null || true
+		local nh; nh="$(grep -c . "$hosts" 2>/dev/null || echo 0)"
+		if [[ "$nh" -gt 0 ]]; then
+			note "deep scan: SYN-sweeping $nh host(s) · ports=$all_ports"
+			run_sweep "deep $nh hosts" "${deep_port_args[@]}" --targets "@$hosts" "${tune[@]}" \
+				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
+			[[ $rc -eq 130 ]] && _scan_abort
+		fi
+		rm -f "$hosts"
+	fi
+
+	# FINALIZE — flip ingest.state=done; the enricher drains any remaining queue
+	# (incl. the connect portscan palier's re-entrant work) then exits.
+	: | "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 
 	[[ $rc -ne 0 ]] && kill "$epid" 2>/dev/null || true
 	wait "$epid" 2>/dev/null || true
