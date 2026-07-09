@@ -150,7 +150,7 @@ cmd_scan() {
 	# --- run: enrichment follows discovery live ---
 	"$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
 	local epid=$!
-	note "live view -> netscan status --db $db --interval 2s"
+	note "live dashboard (autre terminal) ->  netscan status --db $db --interval 2s"
 
 	local rc=0
 	if [[ $use_syn -eq 1 && $use_guard -eq 1 ]]; then
@@ -163,7 +163,14 @@ cmd_scan() {
 
 	[[ $rc -ne 0 ]] && kill "$epid" 2>/dev/null || true
 	wait "$epid" 2>/dev/null || true
-	note "done -> $db  (view: netscan status --db $db)"
+
+	# Final summary: a one-shot ns-status renders the completion banner + findings.
+	if [[ -x "$BIN/ns-status" ]]; then
+		echo >&2
+		"$BIN/ns-status" --db "$db" >&2 || true
+	else
+		note "done -> $db  (view: netscan status --db $db)"
+	fi
 	return $rc
 }
 

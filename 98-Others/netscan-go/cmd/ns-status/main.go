@@ -1,11 +1,14 @@
-// Command ns-status reads the scan store and prints a monitoring snapshot:
-// host counts, work-queue depth by state/stage, recent hosts, and per-binary
-// heartbeats. It is the CLI stand-in for a future web dashboard.
+// Command ns-status reads the scan store and prints a phase-aware monitoring
+// dashboard: discovery/enrichment progress bars, the work queue by palier, and a
+// findings summary (top ports, protocols, web/TLS, geo). In live mode
+// (--interval) it refreshes in place and exits with a completion banner once the
+// scan is done. With --host it prints one host's full record as raw JSON.
 //
 // Example:
 //
-//	ns-status --db scan.db
-//	ns-status --db scan.db --interval 2s
+//	ns-status --db scan.db                 # one-shot snapshot
+//	ns-status --db scan.db --interval 2s   # live dashboard (auto-exits when done)
+//	ns-status --db scan.db --host 1.1.1.1  # full record for one host (JSON)
 package main
 
 import (
@@ -15,7 +18,9 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"sort"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"netscan/internal/fmtx"
@@ -26,6 +31,7 @@ func main() {
 	dbPath := flag.String("db", "", "SQLite database path")
 	interval := flag.Duration("interval", 0, "refresh interval (0 = one shot)")
 	hostIP := flag.String("host", "", "print the full record for this IP and exit")
+	noColor := flag.Bool("no-color", false, "disable ANSI colors")
 	flag.Parse()
 	if *dbPath == "" {
 		fmt.Fprintln(os.Stderr, "ns-status: --db is required")
@@ -45,23 +51,268 @@ func main() {
 		printHost(ctx, st, *hostIP)
 		return
 	}
-	prev := map[string]sample{} // per-tool last counter, for rate computation
+
+	r := &renderer{
+		db:   filepath.Base(*dbPath),
+		col:  styler{on: !*noColor && isTTY(os.Stdout)},
+		prev: map[string]sample{},
+	}
 	for {
-		s, err := st.Stats(ctx)
+		sm, err := st.Summary(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ns-status: stats: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ns-status: summary: %v\n", err)
 			os.Exit(1)
 		}
+		ingestState, _ := st.GetMeta(ctx, store.MetaIngestState)
+		started := readStarted(ctx, st)
+
+		pending := sm.WorkByState[store.StatePending]
+		leased := sm.WorkByState[store.StateLeased]
+		ph := phaseOf(ingestState, pending, leased)
+
 		if *interval > 0 {
 			fmt.Print("\033[2J\033[H") // clear screen for watch mode
 		}
-		printDashboard(s, prev)
-		if *interval <= 0 {
-			return
+		r.render(sm, ph, started)
+
+		if *interval <= 0 || ph == phaseComplete {
+			return // one-shot, or live mode reached completion
 		}
 		time.Sleep(*interval)
 	}
 }
+
+// ---- phases -----------------------------------------------------------------
+
+type phase int
+
+const (
+	phaseDiscovering phase = iota // discovery still feeding the queue
+	phaseEnriching                // discovery done, queue still draining
+	phaseComplete                 // discovery done and queue empty
+)
+
+// phaseOf derives the scan lifecycle from ingestion state + queue depth.
+func phaseOf(ingestState string, pending, leased int64) phase {
+	if ingestState != store.IngestDone {
+		return phaseDiscovering
+	}
+	if pending+leased > 0 {
+		return phaseEnriching
+	}
+	return phaseComplete
+}
+
+// ---- rendering --------------------------------------------------------------
+
+type renderer struct {
+	db   string
+	col  styler
+	prev map[string]sample // per-tool last counter, for rate computation
+}
+
+type sample struct {
+	counter int64
+	at      time.Time
+}
+
+// rate derives a per-second rate from the change in a tool's heartbeat counter
+// since the previous refresh (so it appears from the 2nd sample onward).
+func (r *renderer) rate(rs store.RunStat, now time.Time) (float64, bool) {
+	p, ok := r.prev[rs.Tool]
+	r.prev[rs.Tool] = sample{rs.Counter, now}
+	if !ok || !now.After(p.at) {
+		return 0, false
+	}
+	return float64(rs.Counter-p.counter) / now.Sub(p.at).Seconds(), true
+}
+
+func (r *renderer) render(sm store.Summary, ph phase, started time.Time) {
+	now := time.Now()
+	c := r.col
+
+	// Header: netscan · scan.db · 14:23:07 · elapsed 3m12s
+	head := fmt.Sprintf("%s · %s · %s", c.bold("netscan"), r.db, now.Format("15:04:05"))
+	if !started.IsZero() {
+		head += " · " + c.dim("elapsed "+fmtx.Duration(now.Sub(started)))
+	}
+	fmt.Println(head)
+	fmt.Println()
+
+	done := sm.WorkByState[store.StateDone]
+	pending := sm.WorkByState[store.StatePending]
+	leased := sm.WorkByState[store.StateLeased]
+	failed := sm.WorkByState[store.StateFailed]
+
+	if ph == phaseComplete {
+		banner := fmt.Sprintf("✓ SCAN TERMINÉ · %s hosts", fmtx.Count(uint64(sm.Hosts)))
+		if !started.IsZero() {
+			banner += " · " + fmtx.Duration(now.Sub(started))
+		}
+		fmt.Println(c.green(c.bold(banner)))
+	} else {
+		r.discoveryBar(sm, ph, now)
+		r.enrichmentBar(sm, now, done, pending+leased)
+		r.queueLine(sm, failed)
+	}
+
+	r.findings(sm)
+}
+
+// discoveryBar shows discovery progress (live %/pps/ETA while discovering, or a
+// done marker once ingestion has finished).
+func (r *renderer) discoveryBar(sm store.Summary, ph phase, now time.Time) {
+	rs, ok := findRun(sm.Runs, "ns-discover")
+	if !ok {
+		return
+	}
+	if ph != phaseDiscovering {
+		r.bar("découverte", 1, r.col.dim("terminé"))
+		return
+	}
+	frac := 0.0
+	right := ""
+	if rs.Total > 0 {
+		frac = float64(rs.Counter) / float64(rs.Total)
+		right = fmt.Sprintf("%s/%s", fmtx.Count(uint64(rs.Counter)), fmtx.Count(uint64(rs.Total)))
+	}
+	if pps, live := r.rate(*rs, now); live {
+		right += fmt.Sprintf("  %.0f pps", pps)
+		if pps > 0 && rs.Total > rs.Counter {
+			eta := time.Duration(float64(rs.Total-rs.Counter)/pps) * time.Second
+			right += "  ETA " + fmtx.Duration(eta)
+		}
+	}
+	if rs.Note != "" {
+		right += "  " + r.col.dim(rs.Note)
+	}
+	r.bar("découverte", frac, right)
+}
+
+// enrichmentBar shows enrichment progress as done/(done+remaining), with rate
+// and ETA once a second sample is available.
+func (r *renderer) enrichmentBar(sm store.Summary, now time.Time, done, remaining int64) {
+	total := done + remaining
+	if total == 0 {
+		return // nothing enqueued yet
+	}
+	frac := float64(done) / float64(total)
+	right := fmt.Sprintf("%s/%s", fmtx.Count(uint64(done)), fmtx.Count(uint64(total)))
+	if rs, ok := findRun(sm.Runs, "ns-enrich"); ok {
+		if v, live := r.rate(*rs, now); live {
+			right += fmt.Sprintf("  %.0f/s", v)
+			if v > 0 && remaining > 0 {
+				eta := time.Duration(float64(remaining)/v) * time.Second
+				right += "  ETA " + fmtx.Duration(eta)
+			}
+		}
+	}
+	r.bar("enrichisst", frac, right)
+}
+
+// queueLine shows where enrichment work is sitting, per palier (pending, with a
+// ▸ marker for leased/in-flight) plus a failed total.
+func (r *renderer) queueLine(sm store.Summary, failed int64) {
+	order := []string{"detect", "webinfo", "crawl", "tls-deep", "portscan", "ptr"}
+	seen := map[string]bool{}
+	var parts []string
+	add := func(stg string) {
+		m := sm.QueueByStage[stg]
+		p := m[store.StatePending]
+		l := m[store.StateLeased]
+		if p == 0 && l == 0 {
+			return
+		}
+		s := fmt.Sprintf("%s %d", stg, p)
+		if l > 0 {
+			s += "▸"
+		}
+		parts = append(parts, s)
+	}
+	for _, stg := range order {
+		seen[stg] = true
+		add(stg)
+	}
+	for stg := range sm.QueueByStage { // any custom stages not in the fixed order
+		if !seen[stg] {
+			add(stg)
+		}
+	}
+	if failed > 0 {
+		parts = append(parts, r.col.red(fmt.Sprintf("failed %d", failed)))
+	}
+	if len(parts) > 0 {
+		fmt.Printf("  %s   %s\n", r.col.dim("file"), strings.Join(parts, " · "))
+	}
+}
+
+// findings renders the HOSTS summary block: counts and what the scan found.
+func (r *renderer) findings(sm store.Summary) {
+	c := r.col
+	fmt.Printf("\n%s %s\n", c.bold("HOSTS"), fmtx.Count(uint64(sm.Hosts)))
+
+	if len(sm.TopPorts) > 0 {
+		var b strings.Builder
+		for i, p := range sm.TopPorts {
+			if i > 0 {
+				b.WriteByte(' ')
+			}
+			fmt.Fprintf(&b, "%d(%d)", p.Port, p.Count)
+		}
+		fmt.Printf("  %s  %s\n", c.dim("ports"), b.String())
+	}
+	if len(sm.Protocols) > 0 {
+		fmt.Printf("  %s  %s\n", c.dim("proto"), joinLabels(sm.Protocols))
+	}
+
+	// web / tls / crawl line
+	var wp []string
+	if sm.WebServers > 0 {
+		wp = append(wp, fmt.Sprintf("%d srv", sm.WebServers))
+	}
+	if sm.TLSPorts > 0 {
+		tls := fmt.Sprintf("tls %d", sm.TLSPorts)
+		var warn []string
+		if sm.TLSExpired > 0 {
+			warn = append(warn, fmt.Sprintf("%d expirés", sm.TLSExpired))
+		}
+		if sm.TLSWeak > 0 {
+			warn = append(warn, fmt.Sprintf("%d faibles", sm.TLSWeak))
+		}
+		if len(warn) > 0 {
+			tls += " (" + c.red(strings.Join(warn, ", ")) + ")"
+		}
+		wp = append(wp, tls)
+	}
+	if sm.SensitivePaths > 0 {
+		wp = append(wp, c.red(fmt.Sprintf("crawl %d sensibles", sm.SensitivePaths)))
+	}
+	if len(wp) > 0 {
+		fmt.Printf("  %s  %s\n", c.dim("web"), strings.Join(wp, " · "))
+	}
+	if len(sm.Countries) > 0 {
+		fmt.Printf("  %s  %s\n", c.dim("geo"), joinLabels(sm.Countries))
+	}
+
+	if len(sm.RecentHosts) > 0 {
+		fmt.Printf("  %s\n", c.dim("derniers"))
+		for i, h := range sm.RecentHosts {
+			if i >= 5 {
+				break
+			}
+			fmt.Printf("    %-15s %s\n", h.IP, portsList(h.OpenPorts))
+		}
+	}
+	fmt.Printf("  %s\n", c.dim("→ détails: netscan status --db "+r.db+" --host <IP>"))
+}
+
+func (r *renderer) bar(label string, frac float64, right string) {
+	lab := r.col.dim(fmt.Sprintf("%-11s", label))
+	bar := r.col.green(fmtx.Bar(frac, 18))
+	fmt.Printf("%s %s %3.0f%%  %s\n", lab, bar, frac*100, right)
+}
+
+// ---- helpers ----------------------------------------------------------------
 
 func printHost(ctx context.Context, st *store.SQLite, ipStr string) {
 	ip, err := netip.ParseAddr(ipStr)
@@ -82,58 +333,16 @@ func printHost(ctx context.Context, st *store.SQLite, ipStr string) {
 	fmt.Println(string(out))
 }
 
-type sample struct {
-	counter int64
-	at      time.Time
-}
-
-// printDashboard renders a live picture of both domains. Rates are derived from
-// the change in each tool's heartbeat counter since the previous refresh, so
-// they only appear from the second sample onward (interval mode).
-func printDashboard(s store.Stats, prev map[string]sample) {
-	now := time.Now()
-	rate := func(r store.RunStat) (float64, bool) {
-		p, ok := prev[r.Tool]
-		prev[r.Tool] = sample{r.Counter, now}
-		if !ok || !now.After(p.at) {
-			return 0, false
-		}
-		return float64(r.Counter-p.counter) / now.Sub(p.at).Seconds(), true
+func readStarted(ctx context.Context, st *store.SQLite) time.Time {
+	v, _ := st.GetMeta(ctx, store.MetaScanStarted)
+	if v == "" {
+		return time.Time{}
 	}
-
-	fmt.Printf("== netscan status @ %s ==\n", now.Format("15:04:05"))
-
-	if r, ok := findRun(s.Runs, "ns-discover"); ok {
-		pps, live := rate(*r)
-		pct := ""
-		if r.Total > 0 {
-			pct = fmt.Sprintf(" %.1f%% (%s/%s)", 100*float64(r.Counter)/float64(r.Total),
-				fmtx.Count(uint64(r.Counter)), fmtx.Count(uint64(r.Total)))
-		}
-		eta := ""
-		if live && pps > 0 && r.Total > r.Counter {
-			remaining := time.Duration(float64(r.Total-r.Counter)/pps) * time.Second
-			eta = "  ETA " + fmtx.Duration(remaining)
-		}
-		fmt.Printf("discovery :%s%s  %s%s\n", pct, rateStr(pps, live, "pps"), r.Note, eta)
+	ms, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}
 	}
-	if r, ok := findRun(s.Runs, "ns-ingest"); ok {
-		v, live := rate(*r)
-		fmt.Printf("ingest    : %d hosts%s\n", r.Counter, rateStr(v, live, "/s"))
-	}
-	fmt.Printf("queue     : %s\n", formatCounts(s.WorkByState))
-	if r, ok := findRun(s.Runs, "ns-enrich"); ok {
-		v, live := rate(*r)
-		fmt.Printf("enrich    : %d done%s  %s\n", r.Counter, rateStr(v, live, "/s"), r.Note)
-	}
-	fmt.Printf("hosts     : %d\n", s.Hosts)
-
-	if len(s.RecentHosts) > 0 {
-		fmt.Println("recent    :")
-		for _, h := range s.RecentHosts {
-			fmt.Printf("  %-15s ports=%v\n", h.IP, h.OpenPorts)
-		}
-	}
+	return time.UnixMilli(ms)
 }
 
 func findRun(runs []store.RunStat, tool string) (*store.RunStat, bool) {
@@ -145,28 +354,44 @@ func findRun(runs []store.RunStat, tool string) (*store.RunStat, bool) {
 	return nil, false
 }
 
-func rateStr(v float64, live bool, unit string) string {
-	if !live {
-		return ""
+func joinLabels(ls []store.LabelCount) string {
+	parts := make([]string, len(ls))
+	for i, l := range ls {
+		parts[i] = fmt.Sprintf("%s %d", l.Label, l.Count)
 	}
-	return fmt.Sprintf("  %.0f %s", v, unit)
+	return strings.Join(parts, " · ")
 }
 
-func formatCounts(m map[string]int64) string {
-	if len(m) == 0 {
-		return "(none)"
+func portsList(ports []uint16) string {
+	if len(ports) == 0 {
+		return ""
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := ""
-	for i, k := range keys {
-		if i > 0 {
-			out += "  "
+	parts := make([]string, 0, len(ports))
+	for i, p := range ports {
+		if i >= 8 {
+			parts = append(parts, "…")
+			break
 		}
-		out += fmt.Sprintf("%s=%d", k, m[k])
+		parts = append(parts, strconv.Itoa(int(p)))
 	}
-	return out
+	return strings.Join(parts, ",")
 }
+
+func isTTY(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// styler applies optional ANSI styling.
+type styler struct{ on bool }
+
+func (s styler) wrap(code, t string) string {
+	if !s.on {
+		return t
+	}
+	return "\033[" + code + "m" + t + "\033[0m"
+}
+func (s styler) bold(t string) string  { return s.wrap("1", t) }
+func (s styler) dim(t string) string   { return s.wrap("2", t) }
+func (s styler) green(t string) string { return s.wrap("32", t) }
+func (s styler) red(t string) string   { return s.wrap("31", t) }
