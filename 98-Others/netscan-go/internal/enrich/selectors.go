@@ -37,11 +37,19 @@ func HasNewPorts(h *model.HostRecord) bool {
 	return false
 }
 
-// HasTLS passes if any port completed a TLS handshake (on any port, not just
-// 443) — detect records a cert summary whenever TLS is present.
+// HasTLS passes if any port speaks TLS: classified as https/tls by detect, OR
+// with a cert already grabbed. Gating on the protocol (not only a successful
+// cert grab) means tls-deep still runs when detect's quick cert fetch hiccuped
+// (e.g. an SNI mismatch) — tls-deep does its own handshakes and can recover.
 func HasTLS(h *model.HostRecord) bool {
 	for _, p := range h.Ports {
-		if p != nil && p.TLS != nil && p.TLS.Version != "" {
+		if p == nil {
+			continue
+		}
+		if p.Protocol == model.ProtoHTTPS || p.Protocol == model.ProtoTLS {
+			return true
+		}
+		if p.TLS != nil && p.TLS.Version != "" {
 			return true
 		}
 	}
