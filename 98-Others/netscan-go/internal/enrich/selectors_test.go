@@ -35,6 +35,12 @@ func TestSelectors(t *testing.T) {
 	if HasTLS(http) || HasTLS(ssh) {
 		t.Fatal("HasTLS must fail without TLS")
 	}
+	// Regression: an https port whose detect cert-grab failed (no TLS.Version, e.g.
+	// an SNI mismatch) must STILL trigger tls-deep — gate on protocol, not the cert.
+	httpsNoCert := hostWith(&model.PortInfo{Port: 443, Protocol: model.ProtoHTTPS})
+	if !HasTLS(httpsNoCert) {
+		t.Fatal("HasTLS must pass for an https port even without a grabbed cert")
+	}
 }
 
 func TestHasNewPorts(t *testing.T) {
