@@ -25,6 +25,32 @@ func TestParseBanner(t *testing.T) {
 	}
 }
 
+func TestClassifyBanner(t *testing.T) {
+	cases := []struct{ raw, proto string }{
+		{"SSH-2.0-OpenSSH_9.6", "ssh"},
+		{"RFB 003.008", "vnc"},
+		{"+OK Dovecot ready.", "pop3"},
+		{"* OK [CAPABILITY IMAP4rev1] Dovecot ready.", "imap"},
+		{"* PREAUTH IMAP4rev1 server logged in", "imap"},
+		{"220 mail.example.com ESMTP Postfix", "smtp"},
+		{"220 (vsFTPd 3.0.3)", "ftp"},
+		{"whatever else", "banner"},
+	}
+	for _, c := range cases {
+		if got := classifyBanner(c.raw); got != c.proto {
+			t.Errorf("classifyBanner(%q) = %q, want %q", c.raw, got, c.proto)
+		}
+	}
+}
+
+// RFB's "003.008" is the protocol version, not a software version — parseBanner
+// must not emit a bogus unknown@003.008 service (classifyBanner tags it vnc).
+func TestParseBannerRFBNil(t *testing.T) {
+	if svc := parseBanner("RFB 003.008"); svc != nil {
+		t.Errorf("parseBanner(RFB) = %+v, want nil", *svc)
+	}
+}
+
 func TestSanitizeBanner(t *testing.T) {
 	got := sanitizeBanner([]byte("SSH-2.0-OpenSSH_9.6\r\nextra line"))
 	if got != "SSH-2.0-OpenSSH_9.6" {
