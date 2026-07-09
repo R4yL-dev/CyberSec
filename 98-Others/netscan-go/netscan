@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# netscan — front-end for the netscan-go pipeline. Wraps the four binaries so a
-# full scan (discover -> ingest -> light enrichment) is a single command, and
-# exposes each binary as a subcommand for advanced use.
+# netscan — the friendly front-end for netscan-go. `netscan scan` runs the whole
+# pipeline (discovery → enrichment) as one comprehensive command; each raw binary
+# stays available as a subcommand for scripting.
 set -euo pipefail
 
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -11,95 +11,164 @@ BIN="$ROOT/bin"
 DEFAULT_DB="scan.db"
 
 die() { echo "netscan: $*" >&2; exit 1; }
+note() { echo "netscan: $*" >&2; }
 need() { [[ -x "$BIN/$1" ]] || die "$1 not built — run 'make build'"; }
 
 usage() {
 	cat >&2 <<'EOF'
 netscan — internet-scale port scanner (netscan-go)
 
-usage:
-  netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [--geoip F --asn F] [ns-discover flags...]
+USAGE
+  netscan scan --targets CIDR[,CIDR|@file] [options]
   netscan status [--db FILE] [--host IP] [--interval DUR]
-  netscan discover|ingest|enrich [flags...]     # pass through to the raw binary
-  netscan iptables-clean                        # remove leftover SYN RST guards
+  netscan discover|ingest|enrich [flags...]   # raw binaries (advanced/scripting)
+  netscan iptables-clean                      # remove leftover SYN RST guards
 
-examples:
-  netscan scan --targets 1.1.1.0/24 --db scan.db
-  netscan scan --targets 1.1.1.0/24 --ports 80,443,8080 --syn
-  netscan status --db scan.db
+By default `scan` does everything reasonable, no config: it discovers hosts (SYN
+if available, else connect) on the top-100 common ports, then fully enriches them
+(protocol detection, HTTP + TLS on web, banner on non-web, reverse DNS).
+
+SCAN OPTIONS
+  Targets:
+    --targets CIDR[,CIDR|@file]   what to scan (required)
+    --exclude / --exclude-file    ranges to skip
+    --no-skip-reserved            include reserved/private ranges
+  Discovery:
+    --ports LIST | --top-ports N  ports to probe (default: top 100); LIST is
+                                  80,443,8000-8100 or 'all' (mutually excl.)
+    --syn / --connect             force the method (default: auto — SYN if the
+                                  binary has CAP_NET_RAW, else connect)
+    --rate N                      max probes/sec (default 1000; 0 = unlimited)
+    --timeout DUR                 per-probe timeout (discovery)
+    --workers N                   discovery concurrency
+    --resume                      resume the last interrupted scan (same --db)
+    --yes                         confirm large scans / --rate 0
+  Enrichment:
+    --all-ports [SPEC]            ALSO deep-sweep each host's ports (opt-in, heavy):
+                                  bare = common set, 'all' = 1-65535, or a spec
+    --all-ports-timeout DUR       per-port sweep timeout (default 2s)
+    --pipeline FILE               fully custom enrichment graph (advanced)
+    --enrich-workers N            enrichment concurrency (default 50)
+    --enrich-timeout DUR          per-probe enrichment timeout (default 10s)
+  Output:
+    --db FILE                     SQLite database (default scan.db)
+    --geoip FILE / --asn FILE     GeoIP DBs (auto-detected from data/ if present)
+
+EXAMPLES
+  netscan scan --targets 1.1.1.0/24                     # comprehensive default
+  netscan scan --targets 1.1.1.0/24 --all-ports         # + deep port sweep (common)
+  netscan scan --targets 10.0.0.0/16 --all-ports all --yes
+  netscan scan --targets 1.1.1.0/24 --top-ports 1000
   netscan status --db scan.db --host 1.1.1.1
-
-notes:
-  'scan' runs a one-shot pipeline: discovery -> ingest -> light enrichment (--drain).
-  --syn uses stateless SYN discovery (needs 'make setcap') with a scoped, auto-removed
-  iptables RST guard; override its source port with SRC_PORT=NNN.
 EOF
-	exit 1
+	exit "${1:-1}"
 }
 
+# has_cap: does ns-discover carry the SYN capability?
+has_cap() { getcap "$BIN/ns-discover" 2>/dev/null | grep -q cap_net_raw; }
+# passwordless_sudo: can we run sudo without a prompt (for the iptables guard)?
+passwordless_sudo() { sudo -n true 2>/dev/null; }
+
 cmd_scan() {
-	local db="$DEFAULT_DB" syn=0 args=() geo_flags=() geo_set=0 enrich_flags=()
+	local db="$DEFAULT_DB"
+	local method="auto"                 # auto | syn | connect
+	local ports_set=0 topports_set=0
+	local all_ports="" all_ports_set=0
+	local pipeline_file=""
+	local disc=() geo=() geo_set=0 enrich=()
+
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-			--db)   db="$2"; shift 2 ;;
+			-h|--help) usage 0 ;;
+			--db) db="$2"; shift 2 ;;
 			--db=*) db="${1#*=}"; shift ;;
-			--syn)  syn=1; shift ;;
-			--geoip|--asn) geo_flags+=("$1" "$2"); geo_set=1; shift 2 ;;
-			--geoip=*|--asn=*) geo_flags+=("$1"); geo_set=1; shift ;;
-			--pipeline|--ports-deep|--ports-deep-timeout) enrich_flags+=("$1" "$2"); shift 2 ;;
-			--pipeline=*|--ports-deep=*|--ports-deep-timeout=*) enrich_flags+=("$1"); shift ;;
-			-h|--help) usage ;;
-			*)      args+=("$1"); shift ;;
+			# method
+			--syn) method="syn"; shift ;;
+			--connect) method="connect"; shift ;;
+			# discovery (forwarded to ns-discover)
+			--ports|--ports=*) ports_set=1; disc+=("$1"); [[ "$1" == "--ports" ]] && { disc+=("$2"); shift; }; shift ;;
+			--top-ports|--top-ports=*) topports_set=1; disc+=("$1"); [[ "$1" == "--top-ports" ]] && { disc+=("$2"); shift; }; shift ;;
+			--targets|--exclude|--exclude-file|--rate|--timeout|--workers|--seed) disc+=("$1" "$2"); shift 2 ;;
+			--targets=*|--exclude=*|--exclude-file=*|--rate=*|--timeout=*|--workers=*|--seed=*) disc+=("$1"); shift ;;
+			--no-skip-reserved|--resume|--progress|--yes) disc+=("$1"); shift ;;
+			# enrichment (forwarded to ns-enrich)
+			--all-ports) all_ports_set=1; all_ports="common"
+				if [[ "${2-}" != "" && "${2-}" != --* ]]; then all_ports="$2"; shift; fi; shift ;;
+			--all-ports=*) all_ports_set=1; all_ports="${1#*=}"; shift ;;
+			--all-ports-timeout) enrich+=(--all-ports-timeout "$2"); shift 2 ;;
+			--all-ports-timeout=*) enrich+=("--all-ports-timeout=${1#*=}"); shift ;;
+			--pipeline) pipeline_file="$2"; shift 2 ;;
+			--pipeline=*) pipeline_file="${1#*=}"; shift ;;
+			--enrich-workers) enrich+=(--workers "$2"); shift 2 ;;
+			--enrich-workers=*) enrich+=("--workers=${1#*=}"); shift ;;
+			--enrich-timeout) enrich+=(--timeout "$2"); shift 2 ;;
+			--enrich-timeout=*) enrich+=("--timeout=${1#*=}"); shift ;;
+			# output
+			--geoip|--asn) geo+=("$1" "$2"); geo_set=1; shift 2 ;;
+			--geoip=*|--asn=*) geo+=("$1"); geo_set=1; shift ;;
+			-*) die "unknown scan flag '$1' (see 'netscan scan --help')" ;;
+			*) disc+=("$1"); shift ;;   # bare targets etc.
 		esac
 	done
-	[[ ${#args[@]} -gt 0 ]] || die "scan needs at least --targets (see 'netscan --help')"
-	need ns-discover
-	need ns-ingest
-	need ns-enrich
 
-	# Geo is default-on when the DBs exist under the repo's data/ (make geoip).
-	# Resolve against $ROOT so it works even when netscan is on PATH.
-	if [[ $geo_set -eq 0 ]]; then
-		[[ -f "$ROOT/data/dbip-country.mmdb" ]] && geo_flags+=(--geoip "$ROOT/data/dbip-country.mmdb")
-		[[ -f "$ROOT/data/dbip-asn.mmdb" ]] && geo_flags+=(--asn "$ROOT/data/dbip-asn.mmdb")
+	# --- validation: errors on true conflicts, warnings on no-ops ---
+	[[ $ports_set -eq 1 && $topports_set -eq 1 ]] && die "--ports and --top-ports are mutually exclusive"
+	[[ $all_ports_set -eq 1 && -n "$pipeline_file" ]] && die "--all-ports and --pipeline are mutually exclusive"
+	if [[ $all_ports_set -eq 0 ]] && printf '%s\n' "${enrich[@]}" | grep -q -- '--all-ports-timeout'; then
+		note "warning: --all-ports-timeout has no effect without --all-ports"
 	fi
 
-	# Enrichment runs concurrently with discovery: it drains the queue live and
-	# exits on its own once ingestion signals completion (store meta flag).
-	"$BIN/ns-enrich" --db "$db" --follow "${enrich_flags[@]}" &
-	local epid=$!
+	need ns-discover; need ns-ingest; need ns-enrich
 
-	echo "netscan: live view -> netscan status --db $db --interval 2s" >&2
+	# --- method resolution ---
+	local use_syn=0 use_guard=0
+	case "$method" in
+		syn)     has_cap || die "SYN needs CAP_NET_RAW — run 'make setcap' (or use --connect)"; use_syn=1 ;;
+		connect) use_syn=0 ;;
+		auto)    if has_cap; then use_syn=1; else note "SYN unavailable (run 'make setcap' for speed) — using connect"; fi ;;
+	esac
+	if [[ $use_syn -eq 1 ]]; then
+		if passwordless_sudo; then use_guard=1
+		else note "no passwordless sudo → SYN without the iptables RST guard (works, slightly less polite)"; fi
+	fi
+
+	# --- geo: auto-detect data/ unless overridden ---
+	if [[ $geo_set -eq 0 ]]; then
+		[[ -f "$ROOT/data/dbip-country.mmdb" ]] && geo+=(--geoip "$ROOT/data/dbip-country.mmdb")
+		[[ -f "$ROOT/data/dbip-asn.mmdb" ]] && geo+=(--asn "$ROOT/data/dbip-asn.mmdb")
+	fi
+	[[ $all_ports_set -eq 1 ]] && enrich+=(--all-ports "$all_ports")
+	[[ -n "$pipeline_file" ]] && enrich+=(--pipeline "$pipeline_file")
+
+	# --- run: enrichment follows discovery live ---
+	"$BIN/ns-enrich" --db "$db" --follow "${enrich[@]}" &
+	local epid=$!
+	note "live view -> netscan status --db $db --interval 2s"
 
 	local rc=0
-	if [[ "$syn" == 1 ]]; then
-		# syn-scan.sh does the cap check + scoped iptables guard, and streams NDJSON.
-		"$ROOT/scripts/syn-scan.sh" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" "${geo_flags[@]}" || rc=$?
+	if [[ $use_syn -eq 1 && $use_guard -eq 1 ]]; then
+		"$ROOT/scripts/syn-scan.sh" --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
+	elif [[ $use_syn -eq 1 ]]; then
+		"$BIN/ns-discover" --mode syn --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	else
-		"$BIN/ns-discover" --db "$db" "${args[@]}" | "$BIN/ns-ingest" --db "$db" "${geo_flags[@]}" || rc=$?
+		"$BIN/ns-discover" --db "$db" "${disc[@]}" | "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	fi
 
-	# On success ingest marked "done" so the follower exits itself; on failure it
-	# would poll forever, so stop it. Either way, reap it.
 	[[ $rc -ne 0 ]] && kill "$epid" 2>/dev/null || true
 	wait "$epid" 2>/dev/null || true
-	echo "netscan: done -> $db  (view: netscan status --db $db)" >&2
+	note "done -> $db  (view: netscan status --db $db)"
 	return $rc
 }
 
-# cmd_iptables_clean removes any leftover RST guards tagged by syn-scan.sh
-# (e.g. from a SYN scan that was hard-killed before it could clean up).
+# cmd_iptables_clean removes any leftover RST guards tagged by syn-scan.sh.
 cmd_iptables_clean() {
 	local n=0 spec
 	while IFS= read -r spec; do
 		[[ -n "$spec" ]] || continue
-		# spec: "-A OUTPUT -p tcp ... --comment netscan-rst-guard -j DROP"
 		# shellcheck disable=SC2086
-		if sudo iptables -D ${spec#-A } 2>/dev/null; then
-			n=$((n + 1))
-		fi
+		if sudo iptables -D ${spec#-A } 2>/dev/null; then n=$((n + 1)); fi
 	done < <(sudo iptables -S OUTPUT 2>/dev/null | grep -F -- netscan-rst-guard)
-	echo "netscan: removed $n leftover netscan RST guard(s)" >&2
+	note "removed $n leftover netscan RST guard(s)"
 }
 
 main() {
@@ -112,7 +181,7 @@ main() {
 		ingest)         need ns-ingest;   exec "$BIN/ns-ingest" "$@" ;;
 		enrich)         need ns-enrich;   exec "$BIN/ns-enrich" "$@" ;;
 		iptables-clean) cmd_iptables_clean ;;
-		-h|--help|help) usage ;;
+		-h|--help|help) usage 0 ;;
 		*)              die "unknown command '$cmd' (see 'netscan --help')" ;;
 	esac
 }
