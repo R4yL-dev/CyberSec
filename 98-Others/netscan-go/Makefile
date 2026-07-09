@@ -37,12 +37,15 @@ dropcap:
 	-sudo setcap -r $(DISCOVER)
 	@getcap $(DISCOVER) 2>/dev/null || true
 
-## install: put the 'netscan' launcher on PATH (symlink into PREFIX/bin, default ~/.local)
+## install: symlink the 'netscan' launcher onto PATH (PREFIX/bin, default ~/.local).
+## For `sudo netscan`, install to a system dir in sudo's secure_path:
+##   sudo make install PREFIX=/usr/local
 install:
 	@mkdir -p $(PREFIX)/bin
 	@ln -sf $(abspath netscan) $(PREFIX)/bin/netscan
 	@echo "linked $(PREFIX)/bin/netscan -> $(abspath netscan)"
 	@case ":$$PATH:" in *":$(PREFIX)/bin:"*) ;; *) echo "  note: add $(PREFIX)/bin to your PATH";; esac
+	@echo "  for 'sudo netscan' too: sudo make install PREFIX=/usr/local"
 
 ## uninstall: remove the launcher symlink
 uninstall:

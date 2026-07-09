@@ -155,7 +155,8 @@ make geoip      # download the free DB-IP lite country+ASN databases into data/ 
 make syn        # build, then grant the SYN capability (build + setcap) in one step
 make setcap     # grant CAP_NET_RAW to bin/ns-discover (sudo)
 make dropcap    # remove that capability
-make install    # symlink the `netscan` launcher into ~/.local/bin (PREFIX= to change)
+make install    # symlink `netscan` into ~/.local/bin (add it to PATH)
+                # for `sudo netscan` too:  sudo make install PREFIX=/usr/local
 make test       # go test ./...
 make vet
 make clean
