@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -105,23 +104,6 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `
 
-// unionPorts merges two port lists into a sorted, de-duplicated slice.
-func unionPorts(a, b []uint16) []uint16 {
-	set := make(map[uint16]struct{}, len(a)+len(b))
-	for _, p := range a {
-		set[p] = struct{}{}
-	}
-	for _, p := range b {
-		set[p] = struct{}{}
-	}
-	out := make([]uint16, 0, len(set))
-	for p := range set {
-		out = append(out, p)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
-
 func nowMS() int64             { return time.Now().UnixMilli() }
 func ms(t time.Time) int64     { return t.UnixMilli() }
 func fromMS(v int64) time.Time { return time.UnixMilli(v).UTC() }
@@ -153,7 +135,7 @@ func (s *SQLite) Ingest(ctx context.Context, rec model.WireRecord, stage string,
 	case nil:
 		var prev []uint16
 		if json.Unmarshal([]byte(existing), &prev) == nil {
-			merged = unionPorts(prev, rec.OpenPorts)
+			merged = model.UnionPorts(prev, rec.OpenPorts)
 		}
 	case sql.ErrNoRows:
 		// new host
