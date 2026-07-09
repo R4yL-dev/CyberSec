@@ -24,9 +24,12 @@ USAGE
   netscan discover|ingest|enrich [flags...]   # raw binaries (advanced/scripting)
   netscan iptables-clean                      # remove leftover SYN RST guards
 
-By default `scan` does everything reasonable, no config: it discovers hosts (SYN
-if available, else connect) on the top-100 common ports, then fully enriches them
+By default `scan` is ADAPTIVE and does everything reasonable, no config: pass 1
+discovers hosts broadly (SYN top-100 common ports + an ICMP ping sweep when
+privileged), then pass 2 re-scans only the live /24 blocks with a wider port set
+(top-1000) to catch hosts on uncommon ports — then fully enriches everything
 (protocol detection, HTTP + TLS on web, banner on non-web, reverse DNS).
+Use --fast for a single quick pass. SYN needs root/sudo or `make setcap`.
 
 SCAN OPTIONS
   Targets:
@@ -34,10 +37,14 @@ SCAN OPTIONS
     --exclude / --exclude-file    ranges to skip
     --no-skip-reserved            include reserved/private ranges
   Discovery:
-    --ports LIST | --top-ports N  ports to probe (default: top 100); LIST is
+    --fast, --no-adaptive         single broad pass only (no widening, no ICMP)
+    --widen-ports N|SPEC          pass-2 port set on live blocks (default top-1000;
+                                  N = top-N, or a spec like 1-1024 / all)
+    --widen-min-hosts N           only widen /24s with >= N live hosts (default 1)
+    --ports LIST | --top-ports N  pass-1 ports (default: top 100); LIST is
                                   80,443,8000-8100 or 'all' (mutually excl.)
-    --syn / --connect             force the method (default: auto — SYN if the
-                                  binary has CAP_NET_RAW, else connect)
+    --syn / --connect             force the method (default: auto — SYN if root/sudo
+                                  or the binary has CAP_NET_RAW, else connect)
     --rate N                      max probes/sec (default 1000; 0 = unlimited)
     --timeout DUR                 per-probe timeout (discovery)
     --workers N                   discovery concurrency
@@ -58,10 +65,11 @@ SCAN OPTIONS
     --geoip FILE / --asn FILE     GeoIP DBs (auto-detected from data/ if present)
 
 EXAMPLES
-  netscan scan --targets 1.1.1.0/24                     # comprehensive default
-  netscan scan --targets 1.1.1.0/24 --all-ports         # + deep port sweep (common)
-  netscan scan --targets 10.0.0.0/16 --all-ports all --yes
-  netscan scan --targets 1.1.1.0/24 --top-ports 1000
+  netscan scan --targets 1.1.1.0/24                     # adaptive default (2 passes + ping)
+  sudo netscan scan --targets 10.0.0.0/16               # SYN + ping, enrichment as your user
+  netscan scan --targets 1.1.1.0/24 --fast              # single quick pass
+  netscan scan --targets 1.1.1.0/24 --widen-ports all   # widen live /24s to all ports
+  netscan scan --targets 1.1.1.0/24 --all-ports         # + per-host deep port sweep
   netscan status --db scan.db --host 1.1.1.1
 EOF
 	exit "${1:-1}"
@@ -162,6 +170,9 @@ cmd_scan() {
 		note "warning: --all-ports-timeout/--all-ports-conc have no effect without --all-ports"
 	fi
 
+	[[ ${#tgt[@]} -gt 0 ]] || die "--targets is required (CIDR[,CIDR|@file])"
+	local tgt_csv; tgt_csv="$(IFS=,; echo "${tgt[*]}")"  # ns-discover takes one --targets
+
 	need ns-discover; need ns-ingest; need ns-enrich; need ns-status
 
 	# --- method resolution (root/sudo OR setcap → SYN; else connect) ---
@@ -205,15 +216,15 @@ cmd_scan() {
 	local rc=0
 	if [[ $fast -eq 1 ]]; then
 		# Single broad pass (no widening, no ICMP).
-		run_sweep "" "${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
+		run_sweep "" --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
 			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	else
 		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep; the
 		# intermediate ingest keeps the --follow enricher alive for pass 2.
 		{
-			run_sweep broad "${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}" "${p1ports[@]}"
+			run_sweep broad --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}"
 			[[ $use_syn -eq 1 ]] && "$BIN/ns-discover" --mode icmp --label ping --db "$db" \
-				"${tgt[@]/#/--targets=}" "${excl[@]}" "${tune[@]}"
+				--targets "$tgt_csv" "${excl[@]}" "${tune[@]}"
 		} | "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 
 		# Derive live /24 blocks and widen ports on them (or finalize if none).
