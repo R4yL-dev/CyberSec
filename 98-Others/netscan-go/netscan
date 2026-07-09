@@ -69,8 +69,27 @@ EOF
 
 # has_cap: does ns-discover carry the SYN capability?
 has_cap() { getcap "$BIN/ns-discover" 2>/dev/null | grep -q cap_net_raw; }
+# is_root: are we running as root (can raw-socket without setcap)?
+is_root() { [[ "$(id -u)" -eq 0 ]]; }
 # passwordless_sudo: can we run sudo without a prompt (for the iptables guard)?
 passwordless_sudo() { sudo -n true 2>/dev/null; }
+
+# run_sweep <label> [ns-discover args...] — one discovery sweep to stdout (NDJSON),
+# in the resolved TCP method (SYN, with the iptables RST guard when available, or
+# connect). Reads $disc_mode / $use_guard / $db from the calling cmd_scan (bash
+# dynamic scope).
+run_sweep() {
+	local label="$1"; shift
+	if [[ "$disc_mode" == "syn" ]]; then
+		if [[ $use_guard -eq 1 ]]; then
+			"$ROOT/scripts/syn-scan.sh" --label "$label" --db "$db" "$@"
+		else
+			"$BIN/ns-discover" --mode syn --label "$label" --db "$db" "$@"
+		fi
+	else
+		"$BIN/ns-discover" --label "$label" --db "$db" "$@"
+	fi
+}
 
 cmd_scan() {
 	local db="$DEFAULT_DB"

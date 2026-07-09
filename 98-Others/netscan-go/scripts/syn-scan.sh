@@ -23,8 +23,9 @@ if [[ ! -x "$BIN" ]]; then
   echo "syn-scan: $BIN not found — run 'make build' first" >&2
   exit 1
 fi
-if ! getcap "$BIN" | grep -q cap_net_raw; then
-  echo "syn-scan: ns-discover lacks CAP_NET_RAW — run 'make setcap'" >&2
+# root can raw-socket regardless; otherwise the CAP_NET_RAW capability is required.
+if [[ "$(id -u)" -ne 0 ]] && ! getcap "$BIN" | grep -q cap_net_raw; then
+  echo "syn-scan: ns-discover lacks CAP_NET_RAW — run 'make setcap' (or run as root)" >&2
   exit 1
 fi
 
