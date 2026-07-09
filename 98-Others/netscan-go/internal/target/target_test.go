@@ -18,6 +18,42 @@ func collect(t *testing.T, targets, excludes []string, skipReserved bool) []neti
 	return out
 }
 
+func TestWithinAllowlist(t *testing.T) {
+	// Space over the whole /24, clipped to a /26 → only .0-.63 may be scanned.
+	s, err := NewSpace([]string{"1.2.3.0/24"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWithin([]string{"1.2.3.0/26"}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Allowed(netip.MustParseAddr("1.2.3.10")) {
+		t.Fatal("in-scope .10 must be allowed")
+	}
+	if s.Allowed(netip.MustParseAddr("1.2.3.100")) {
+		t.Fatal("out-of-scope .100 must be blocked by within")
+	}
+	// Iteration must never emit an address outside the /26.
+	var pos uint64
+	n := 0
+	for addr := range s.RandomizedFrom(1, 0, &pos) {
+		if !netip.MustParsePrefix("1.2.3.0/26").Contains(addr) {
+			t.Fatalf("emitted out-of-scope address %s", addr)
+		}
+		n++
+	}
+	if n != 64 {
+		t.Fatalf("emitted %d addresses, want 64 (the /26)", n)
+	}
+	// Empty within = no restriction.
+	if err := s.SetWithin(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Allowed(netip.MustParseAddr("1.2.3.100")) {
+		t.Fatal("cleared within must allow the whole space again")
+	}
+}
+
 func TestReservedRangeExcluded(t *testing.T) {
 	// A fully private /24, with reserved-skipping on, yields nothing.
 	if got := len(collect(t, []string{"10.0.0.0/24"}, nil, true)); got != 0 {
