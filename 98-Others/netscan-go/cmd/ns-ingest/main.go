@@ -27,6 +27,7 @@ func main() {
 	dbPath := flag.String("db", "", "SQLite database path")
 	geoPath := flag.String("geoip", "data/dbip-country.mmdb", "GeoIP .mmdb (country/city); \"\" to disable")
 	asnPath := flag.String("asn", "data/dbip-asn.mmdb", "ASN .mmdb; \"\" to disable")
+	intermediate := flag.Bool("intermediate", false, "this is a non-final pass: do NOT mark ingestion done (keeps the --follow enricher alive between adaptive passes)")
 	flag.Parse()
 	if *dbPath == "" {
 		fatal("--db is required")
@@ -71,8 +72,10 @@ func main() {
 	if err != nil && ctx.Err() == nil {
 		fatal("ingest: %v", err)
 	}
-	// Signal completion only on a clean finish (all input consumed).
-	if err == nil && ctx.Err() == nil {
+	// Signal completion only on a clean finish (all input consumed) — unless this
+	// is an intermediate adaptive pass, which leaves state=running so the
+	// --follow enricher keeps draining until the final pass finishes.
+	if err == nil && ctx.Err() == nil && !*intermediate {
 		_ = st.SetMeta(context.Background(), store.MetaIngestState, store.IngestDone)
 	}
 }

@@ -267,6 +267,61 @@ func TestSummaryFindings(t *testing.T) {
 	}
 }
 
+func TestLiveBlocksAndPortlessIngest(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	// Two hosts in 1.2.3.0/24 (with ports), one in 5.6.7.0/24, and a portless
+	// (ICMP-alive) host in 9.9.9.0/24.
+	if err := s.Ingest(ctx, rec("1.2.3.10", 80), model.StageDetect, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ingest(ctx, rec("1.2.3.20", 443), model.StageDetect, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ingest(ctx, rec("5.6.7.8", 22), model.StageDetect, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Portless liveness record: no open ports.
+	if err := s.Ingest(ctx, rec("9.9.9.9"), model.StageDetect, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Portless record must NOT enqueue a detect work item, but the others must.
+	items, _ := s.Claim(ctx, model.StageDetect, 10, time.Second)
+	if len(items) != 3 {
+		t.Fatalf("claimed %d detect items, want 3 (portless host must not enqueue)", len(items))
+	}
+	for _, it := range items {
+		if it.IP.String() == "9.9.9.9" {
+			t.Fatal("portless ICMP host was enqueued for enrichment")
+		}
+	}
+
+	// /24 blocks with >= 2 hosts → only 1.2.3.0/24.
+	blocks2, err := s.LiveBlocks(ctx, 24, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks2) != 1 || blocks2[0].String() != "1.2.3.0/24" {
+		t.Fatalf("LiveBlocks(24,2) = %v, want [1.2.3.0/24]", blocks2)
+	}
+
+	// /24 blocks with >= 1 host → all three, sorted (portless host counts too).
+	blocks1, err := s.LiveBlocks(ctx, 24, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, b := range blocks1 {
+		got = append(got, b.String())
+	}
+	want := []string{"1.2.3.0/24", "5.6.7.0/24", "9.9.9.0/24"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("LiveBlocks(24,1) = %v, want %v", got, want)
+	}
+}
+
 func TestLeaseExpiryReclaim(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
