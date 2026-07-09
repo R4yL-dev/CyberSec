@@ -7,10 +7,14 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"netscan/internal/model"
 )
+
+// crawlProbeConc bounds how many path probes run at once per port.
+const crawlProbeConc = 8
 
 // probe is one path the crawl palier checks, plus an optional signature that
 // must appear in the body to count it as a genuine hit (guards against catch-all
@@ -57,21 +61,36 @@ func NewCrawl(timeout time.Duration) *Crawl {
 func (c *Crawl) Stage() string { return model.StageCrawl }
 
 func (c *Crawl) Enrich(ctx context.Context, host *model.HostRecord) error {
+	// Overall per-host budget: a slow/tarpit host (every request burns the full
+	// per-request timeout) across several web ports must not run for minutes.
+	// Best-effort — on expiry we keep whatever was collected and move on.
+	cctx, cancel := context.WithTimeout(ctx, c.budget())
+	defer cancel()
+
 	for _, port := range host.OpenPorts {
-		if ctx.Err() != nil {
+		if cctx.Err() != nil {
 			break
 		}
 		pi := host.Ports[port]
 		if pi == nil || (pi.Protocol != model.ProtoHTTP && pi.Protocol != model.ProtoHTTPS) {
 			continue // not a web port (per detect)
 		}
-		pi.Crawl = c.crawl(ctx, host.IP, port, pi.Protocol == model.ProtoHTTPS)
+		pi.Crawl = c.crawl(cctx, host.IP, port, pi.Protocol == model.ProtoHTTPS)
 	}
 	if host.Status == nil {
 		host.Status = make(map[string]string, 1)
 	}
 	host.Status[model.StageCrawl] = "ok"
 	return nil
+}
+
+// budget caps the total time spent crawling one host, across all its web ports.
+func (c *Crawl) budget() time.Duration {
+	b := 3 * c.Timeout
+	if b < 15*time.Second {
+		b = 15 * time.Second
+	}
+	return b
 }
 
 func (c *Crawl) client() *http.Client {
