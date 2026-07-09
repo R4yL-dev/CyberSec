@@ -118,6 +118,14 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 	start := time.Now()
 	lastHB := time.Now()
 	for ctx.Err() == nil {
+		// Read inflight BEFORE claiming. A busy worker reschedules downstream
+		// stages (e.g. detect -> webinfo, or portscan -> detect) *before* it
+		// decrements inflight, so if inflight was 0 here and the claim below finds
+		// nothing, the queue is truly drained — no reschedule can be in flight.
+		// (Reading inflight after the claim would let a reschedule slip through the
+		// window and cause a premature exit.)
+		idle := atomic.LoadInt64(inflight) == 0
+
 		got := 0
 		for _, stage := range stages {
 			items, err := st.Claim(ctx, stage, batch, lease)
@@ -136,9 +144,6 @@ func dispatch(ctx context.Context, st *store.SQLite, itemCh chan<- store.WorkIte
 			}
 		}
 		if got == 0 {
-			// Only conclude the queue is drained when nothing is in flight either:
-			// a busy worker may still enqueue downstream stages (light -> webinfo/ptr).
-			idle := atomic.LoadInt64(inflight) == 0
 			if idle && drain {
 				return
 			}

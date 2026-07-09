@@ -28,7 +28,7 @@ import (
 
 	"netscan/internal/fmtx"
 	"netscan/internal/model"
-	"netscan/internal/ports"
+	commonports "netscan/internal/ports"
 	"netscan/internal/scan"
 	"netscan/internal/store"
 	"netscan/internal/stream"
@@ -84,7 +84,7 @@ func main() {
 		}
 		ports = p
 	} else {
-		common := ports.Common()
+		common := commonports.Common()
 		n := *topPorts
 		if n <= 0 || n > len(common) {
 			n = len(common)
