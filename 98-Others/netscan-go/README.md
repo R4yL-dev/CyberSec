@@ -181,43 +181,42 @@ attached to the binary file, so it is cleared every time you rebuild** — re-ru
 
 ## Usage
 
-The `netscan` launcher wraps the four binaries so a full scan is one command; each binary is
-also exposed as a subcommand for advanced use.
-
-```
-netscan scan   --targets CIDR[,CIDR|@file] [--ports P] [--db FILE] [--syn] [ns-discover flags...]
-netscan status [--db FILE] [--host IP] [--interval DUR]
-netscan discover|ingest|enrich [flags...]     # pass through to the raw binary
-```
-
-**Connect workflow (no privilege):**
+`netscan scan` is the one command you need — **by default it does everything reasonable, no
+config**: it discovers hosts (SYN if the binary has the capability, else connect) on the top-100
+common ports, then fully enriches them (protocol detection, HTTP + TLS on web, sensitive-path
+crawl, banner on non-web, reverse DNS). Flags only **restrict or tune**; nothing needs enabling.
 
 ```bash
-make build
-./netscan scan --targets 1.1.1.0/24 --ports 80,443 --db scan.db
-./netscan status --db scan.db
-./netscan status --db scan.db --host 1.1.1.1     # full record for one host
+make build            # (once) — and `make setcap` if you want SYN speed
+netscan scan --targets 1.1.1.0/24                 # comprehensive default
+netscan status --db scan.db                       # summary
+netscan status --db scan.db --host 1.1.1.1        # full record for one host
+netscan scan --help                               # grouped, documented options
 ```
 
-`scan` runs the pipeline with discovery and enrichment **overlapped**: it starts an
-`ns-enrich --follow` worker that drains the queue live while discovery is still running, and
-exits once ingestion is done and the queue is empty. Watch progress with a live dashboard in
-another pane: `netscan status --db scan.db --interval 2s`.
+`scan` overlaps discovery and enrichment: an `ns-enrich --follow` worker drains the queue live
+while discovery runs, and exits when done. Watch it: `netscan status --db scan.db --interval 2s`.
 
-**SYN workflow (privileged, faster):**
+**Discovery method is automatic.** With `make setcap` done, `scan` uses fast **SYN**; otherwise it
+falls back to **connect** (and says so). The SYN kernel-RST iptables guard is used only if
+passwordless sudo is available; otherwise SYN runs without it (harmless, slightly less polite).
+Force with `--syn` / `--connect`. Clean up a leftover guard from a killed scan with
+`netscan iptables-clean`.
+
+**Common options** (see `netscan scan --help` for the grouped list):
 
 ```bash
-make syn                                          # build + setcap (sudo, once per build)
-./netscan scan --targets 1.1.1.0/24 --syn --db scan.db
-SRC_PORT=55555 ./netscan scan --targets 1.1.1.0/24 --syn --db scan.db   # pin the source port
+netscan scan --targets 1.1.1.0/24 --top-ports 1000        # widen the discovery port set
+netscan scan --targets 1.1.1.0/24 --ports 22,80,443,8000-8100
+netscan scan --targets 1.1.1.0/24 --all-ports             # ALSO deep-sweep each host's ports
+netscan scan --targets 10.0.0.0/16 --all-ports all --yes  # sweep every port, big scan
+netscan scan --targets 1.1.1.0/24 --pipeline my.yaml      # fully custom enrichment graph
 ```
 
-Under `--syn`, the launcher calls `scripts/syn-scan.sh`, which checks the capability and wraps
-the scan in a **scoped, auto-removed iptables guard** (see [How it works](#the-kernel-rst-pitfall)).
-It asks for your sudo password **once** (only for iptables — the scan runs unprivileged via the
-capability) and keeps that credential fresh so the cleanup at the end never re-prompts, even on a
-multi-hour scan. If a SYN scan is ever hard-killed before it can clean up, remove any leftover
-guard with `netscan iptables-clean`.
+`--all-ports` is the single opt-in for the heavy per-host port sweep (the `portscan` palier): bare
+= a common set, `all` = 1-65535, or a spec like `1-1024,3306`. Newly-found ports are re-classified
+and enriched automatically. It's the most aggressive part (many connects per host, NAT-heavy), so
+it's off by default. `--all-ports-timeout` (default `2s`) tunes the per-port sweep timeout.
 
 **Composing the raw binaries** (streaming / long-running enrichment):
 
