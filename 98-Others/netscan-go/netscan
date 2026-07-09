@@ -248,8 +248,8 @@ cmd_scan() {
 
 	local rc=0
 	if [[ $fast -eq 1 ]]; then
-		# Single broad pass (no widening, no ICMP).
-		run_sweep "" --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
+		# Single broad pass (no widening, no ICMP). --mark-start stamps elapsed.
+		run_sweep "" --mark-start --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" \
 			| "${pre[@]}" "$BIN/ns-ingest" --db "$db" "${geo[@]}" || rc=$?
 	else
 		# PASS 1 — broad TCP sweep + (if SYN capable) an ICMP liveness sweep; the
@@ -258,7 +258,7 @@ cmd_scan() {
 		# interrupt) to the pipe — a plain { } block would return its trailing
 		# command's status and mask it.
 		(
-			run_sweep broad --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" || exit $?
+			run_sweep broad --mark-start --targets "$tgt_csv" "${excl[@]}" "${tune[@]}" "${p1ports[@]}" || exit $?
 			if [[ $use_syn -eq 1 ]]; then
 				"$BIN/ns-discover" --mode icmp --label ping --db "$db" \
 					--targets "$tgt_csv" "${excl[@]}" "${tune[@]}" || exit $?

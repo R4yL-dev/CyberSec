@@ -60,6 +60,7 @@ func main() {
 		progress    = flag.Bool("progress", false, "print a live progress line to stderr (\\r on a TTY, periodic lines otherwise)")
 		yes         = flag.Bool("yes", false, "confirm scans larger than the safety threshold")
 		label       = flag.String("label", "", "short sweep label surfaced in ns-status (e.g. broad, ping, widening N blocks)")
+		markStart   = flag.Bool("mark-start", false, "stamp the scan-start time (ns-status elapsed); the launcher sets this on the first sweep only")
 	)
 	flag.Parse()
 
@@ -128,10 +129,10 @@ func main() {
 			fatal("open store: %v", err)
 		}
 		defer st.Close()
-		// Stamp the scan start (for ns-status "elapsed") only if unset, so the
-		// several ns-discover invocations of an adaptive scan (broad, ping, widen)
-		// share one start and a resume keeps the original.
-		if v, _ := st.GetMeta(context.Background(), store.MetaScanStarted); v == "" {
+		// The launcher sets --mark-start on the first sweep only, so every sweep of
+		// one scan shares a single start time AND a reused db reflects the NEW scan's
+		// elapsed (not the previous one's). A resume keeps the original start.
+		if *markStart && !*resume {
 			_ = st.SetMeta(context.Background(), store.MetaScanStarted,
 				strconv.FormatInt(time.Now().UnixMilli(), 10))
 		}
