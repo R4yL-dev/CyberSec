@@ -211,8 +211,14 @@ func main() {
 		progTotal = space.Total() * uint64(len(ports)) * uint64(max(*retries, 1))
 		fmt.Fprintf(os.Stderr, "[*] syn     : src-port=%d (scope iptables RST rule to this port)\n", sp.SrcPort())
 		prober = sp
+	case "icmp":
+		ip := scan.NewICMPProber(*retries, *grace, limiter)
+		ip.Progress = &scanned
+		progTotal = space.Total() * uint64(max(*retries, 1)) // one echo per address
+		fmt.Fprintln(os.Stderr, "[*] icmp    : echo liveness sweep")
+		prober = ip
 	default:
-		fatal("unknown mode %q (want connect|syn)", *mode)
+		fatal("unknown mode %q (want connect|syn|icmp)", *mode)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -32,6 +32,8 @@ func main() {
 	interval := flag.Duration("interval", 0, "refresh interval (0 = one shot)")
 	hostIP := flag.String("host", "", "print the full record for this IP and exit")
 	noColor := flag.Bool("no-color", false, "disable ANSI colors")
+	liveBlocks := flag.Int("live-blocks", 0, "print live /N blocks as CIDRs and exit (for the adaptive pass-2 target list); 0 = disabled")
+	minHosts := flag.Int("min-hosts", 1, "with --live-blocks: minimum hosts a block needs to be listed")
 	flag.Parse()
 	if *dbPath == "" {
 		fmt.Fprintln(os.Stderr, "ns-status: --db is required")
@@ -49,6 +51,10 @@ func main() {
 
 	if *hostIP != "" {
 		printHost(ctx, st, *hostIP)
+		return
+	}
+	if *liveBlocks > 0 {
+		printLiveBlocks(ctx, st, *liveBlocks, *minHosts)
 		return
 	}
 
