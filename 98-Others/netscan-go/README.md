@@ -266,7 +266,8 @@ can use enough workers; if the rate still can't be met it prints a one-line warn
 
 **`ns-enrich` flags:** `--db`, `--stage` (comma-separated stages to drain; default: the whole
 pipeline), `--pipeline <file.yaml>` (custom pipeline; default: built-in graph), `--print-pipeline`
-(dump the default YAML as a template), `--workers 50`, `--timeout 10s`, `--max-attempts 5`,
+(dump the default YAML as a template), `--ports-deep` / `--ports-deep-timeout 2s` (portscan
+breadth/timeout), `--workers 50`, `--timeout 10s`, `--max-attempts 5`,
 `--lease 2m`, `--backoff 5s`, `--drain` (exit on first empty queue), `--follow` (drain until
 ingestion is done, then exit — used by `netscan scan` for overlap).
 
@@ -302,9 +303,13 @@ netscan scan --targets 1.1.1.0/24 --db scan.db --pipeline profiles/deep.yaml --p
 ```
 
 `--ports-deep` is `all` (1-65535), a spec like `1-1024,3306,8000-8100`, or empty (a curated common
-set). Newly-found ports are unioned into the host and **re-classified/enriched by re-entering
-`detect`** (the `portscan → detect` edge; the `needs_portscan` guard runs portscan once).
-`ns-discover --top-ports N` scans the N most common ports for the discovery phase.
+set). `--ports-deep-timeout` (default `2s`) is the per-port connect timeout — short because it's a
+sweep; raise it on high-latency/lossy networks to avoid missing slow-but-open ports (a filtered
+port costs the full timeout). Newly-found ports are unioned into the host and **re-classified/
+enriched by re-entering `detect`** — but only when portscan actually found new ports (the
+`portscan → detect` edge is gated `has_new_ports`, so no wasteful double-enrichment otherwise; the
+`needs_portscan` guard runs portscan once). `ns-discover --top-ports N` scans the N most common
+ports for the discovery phase.
 **`ns-status` flags:** `--db`, `--interval 0` (0 = one shot; `>0` = live dashboard with per-tool
 rates, discovery %/pps, queue depth and enrichment throughput), `--host IP` (full record).
 **`ns-ingest` flags:** `--db`.
