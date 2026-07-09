@@ -295,7 +295,7 @@ cmd_scan() {
 		[[ "$widen_ports" =~ ^[0-9]+$ ]] && widen_args=(--top-ports "$widen_ports")
 		if [[ "$n" -gt 0 ]]; then
 			note "adaptive: widening $n live /24 block(s)"
-			run_sweep "widening $n blocks" --targets "@$blocks" "${excl[@]}" "${tune[@]}" "${widen_args[@]}" \
+			run_sweep "widening $n blocks" --targets "@$blocks" --within "$tgt_csv" "${excl[@]}" "${tune[@]}" "${widen_args[@]}" \
 				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 			[[ $rc -eq 130 ]] && _scan_abort
 		fi
@@ -311,7 +311,7 @@ cmd_scan() {
 		local nh; nh="$(grep -c . "$hosts" 2>/dev/null || :)"; nh="${nh:-0}"
 		if [[ "$nh" -gt 0 ]]; then
 			note "deep scan: SYN-sweeping $nh host(s) · ports=$all_ports"
-			run_sweep "deep $nh hosts" "${deep_port_args[@]}" --targets "@$hosts" "${tune[@]}" \
+			run_sweep "deep $nh hosts" "${deep_port_args[@]}" --targets "@$hosts" --within "$tgt_csv" "${excl[@]}" "${tune[@]}" \
 				| "${pre[@]}" "$BIN/ns-ingest" --db "$db" --intermediate "${geo[@]}" || rc=$?
 			[[ $rc -eq 130 ]] && _scan_abort
 		fi

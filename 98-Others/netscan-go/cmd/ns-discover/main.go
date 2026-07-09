@@ -96,6 +96,11 @@ func main() {
 	}
 
 	space, err := target.NewSpace(targets, excludes, !*noReserved)
+	if err == nil {
+		if within := gatherTargets(*withinFlag, nil); len(within) > 0 {
+			err = space.SetWithin(within)
+		}
+	}
 	if err != nil {
 		fatal("%v", err)
 	}
