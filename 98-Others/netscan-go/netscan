@@ -288,7 +288,9 @@ cmd_scan() {
 		# PASS 2 — widen ports on the live /24 blocks.
 		local blocks; blocks="$(mktemp)"
 		"$BIN/ns-status" --db "$db" --live-blocks 24 --min-hosts "$widen_min_hosts" >"$blocks" 2>/dev/null || true
-		local n; n="$(grep -c . "$blocks" 2>/dev/null || echo 0)"
+		# grep -c prints "0" AND exits 1 on an empty file; `|| :` swallows the exit
+		# without appending a second "0" (which would make "$n" the string "0\n0").
+		local n; n="$(grep -c . "$blocks" 2>/dev/null || :)"; n="${n:-0}"
 		local widen_args=(--ports "$widen_ports")
 		[[ "$widen_ports" =~ ^[0-9]+$ ]] && widen_args=(--top-ports "$widen_ports")
 		if [[ "$n" -gt 0 ]]; then
@@ -306,7 +308,7 @@ cmd_scan() {
 	if [[ $deep_syn -eq 1 ]]; then
 		local hosts; hosts="$(mktemp)"
 		"$BIN/ns-status" --db "$db" --live-blocks 32 --min-hosts 1 >"$hosts" 2>/dev/null || true
-		local nh; nh="$(grep -c . "$hosts" 2>/dev/null || echo 0)"
+		local nh; nh="$(grep -c . "$hosts" 2>/dev/null || :)"; nh="${nh:-0}"
 		if [[ "$nh" -gt 0 ]]; then
 			note "deep scan: SYN-sweeping $nh host(s) · ports=$all_ports"
 			run_sweep "deep $nh hosts" "${deep_port_args[@]}" --targets "@$hosts" "${tune[@]}" \
